@@ -1,0 +1,21 @@
+# Zig build outputs
+/zig-out/
+/.zig-cache/
+
+# ISO staging and images
+/iso_root/
+/iso/
+/kernel.iso
+/*.iso
+
+# Root-level compiled objects and binaries from experiments
+/*.o
+/boot.bin
+/output.txt
+
+# OS/Editor cruft
+.DS_Store
+Thumbs.db
+
+# Node leftovers (no package.json present)
+/package-lock.json
