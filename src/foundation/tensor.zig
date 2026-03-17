@@ -209,6 +209,40 @@ pub fn Tensor(comptime T: type) type {
             return result;
         }
 
+        /// Element-wise multiplication (Hadamard product)
+        ///
+        /// ## Educational Note: Element-wise Operations in Transformers
+        /// Element-wise multiplication is crucial for gating mechanisms:
+        ///
+        /// ### Gated Linear Units (GLU, SwiGLU, GeGLU)
+        /// ```
+        /// gate_values = sigmoid(linear1(x))  or  SiLU(linear1(x))
+        /// content_values = linear2(x)
+        /// output = gate_values ⊙ content_values  (⊙ = element-wise multiply)
+        /// ```
+        ///
+        /// ### Attention Mechanisms
+        /// ```
+        /// attention_output = attention_weights ⊙ values
+        /// ```
+        ///
+        /// ### Mathematical Definition
+        /// For tensors A and B of same shape: C[i] = A[i] × B[i]
+        pub fn elementWiseMultiply(self: Self, other: Self, allocator: Allocator) TensorError!Self {
+            // Check that shapes match exactly
+            if (!std.mem.eql(usize, self.shape, other.shape)) {
+                return TensorError.IncompatibleShapes;
+            }
+
+            var result = try Self.init(allocator, self.shape);
+
+            for (0..self.size) |i| {
+                result.data[i] = self.data[i] * other.data[i];
+            }
+
+            return result;
+        }
+
         /// Matrix multiplication for 2D tensors
         ///
         /// ## Educational Note: Matrix Multiplication in Transformers

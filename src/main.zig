@@ -18,25 +18,37 @@ pub const foundation = struct {
     pub const tensor = @import("foundation/tensor.zig");
 };
 
-// Placeholder modules for future implementation
+// Linear algebra layer with SIMD optimizations and quantization
 pub const linear_algebra = struct {
-    // TODO: SIMD operations, quantization, optimized matrix operations
+    pub const matrix_ops = @import("linear_algebra/matrix_ops.zig");
+    pub const quantization = @import("linear_algebra/quantization.zig");
 };
 
 pub const neural_primitives = struct {
-    // TODO: Activation functions, normalization layers, embeddings
+    pub const activations = @import("neural_primitives/activations.zig");
+    pub const normalization = @import("neural_primitives/normalization.zig");
+    pub const embeddings = @import("neural_primitives/embeddings.zig");
 };
 
 pub const transformers = struct {
-    // TODO: Multi-head attention, feed-forward networks, transformer blocks
+    pub const attention = @import("transformers/attention.zig");
+    pub const feed_forward = @import("transformers/feed_forward.zig");
+    pub const transformer_block = @import("transformers/transformer_block.zig");
 };
 
 pub const models = struct {
-    // TODO: LLaMA architecture, model loading, GGUF support
+    pub const llama = @import("models/llama.zig");
+    pub const config = @import("models/config.zig");
+    pub const tokenizer = @import("models/tokenizer.zig");
+    pub const gguf = @import("models/gguf.zig");
 };
 
 pub const inference = struct {
-    // TODO: Text generation, sampling strategies, optimization
+    pub const generation = @import("inference/generation.zig");
+    pub const kv_cache = @import("inference/kv_cache.zig");
+    pub const streaming = @import("inference/streaming.zig");
+    pub const batching = @import("inference/batching.zig");
+    pub const profiling = @import("inference/profiling.zig");
 };
 
 /// ZigLlama version following semantic versioning
@@ -112,7 +124,8 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const stdout = std.io.getStdErr().writer();
+    const stderr = std.io.getStdErr();
+    const stdout = stderr.writer();
 
     try stdout.print("ZigLlama v{} - Educational LLaMA Implementation\n", .{version});
     try stdout.print("=============================================\n\n", .{});
@@ -141,4 +154,21 @@ test "library structure and version" {
 test {
     std.testing.refAllDecls(@This());
     _ = @import("foundation/tensor.zig");
+    _ = @import("linear_algebra/matrix_ops.zig");
+    _ = @import("linear_algebra/quantization.zig");
+    _ = @import("neural_primitives/activations.zig");
+    _ = @import("neural_primitives/normalization.zig");
+    _ = @import("neural_primitives/embeddings.zig");
+    _ = @import("transformers/attention.zig");
+    _ = @import("transformers/feed_forward.zig");
+    _ = @import("transformers/transformer_block.zig");
+    _ = @import("models/llama.zig");
+    _ = @import("models/config.zig");
+    _ = @import("models/tokenizer.zig");
+    _ = @import("models/gguf.zig");
+    _ = @import("inference/generation.zig");
+    _ = @import("inference/kv_cache.zig");
+    _ = @import("inference/streaming.zig");
+    _ = @import("inference/batching.zig");
+    _ = @import("inference/profiling.zig");
 }

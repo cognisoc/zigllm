@@ -86,6 +86,7 @@ pub const QuantParams = union(QuantType) {
 /// - **Per-channel**: Different scales for each output channel
 /// - **Packed**: Multiple values per byte (e.g., two 4-bit values per byte)
 pub fn QuantizedTensor(comptime quant_type: QuantType) type {
+    _ = quant_type;
     return struct {
         const Self = @This();
 
@@ -224,10 +225,10 @@ fn quantizeQ4_0(tensor: Tensor(f32), allocator: Allocator) !QuantizedTensor(.Q4_
             const q2 = std.math.clamp(@as(i8, @intFromFloat((val2 - min_val) / scale - 8)), -8, 7);
 
             // Pack two 4-bit values into one byte
-            const packed = @as(u8, @bitCast(@as(i8, q1 & 0xF))) |
-                          (@as(u8, @bitCast(@as(i8, q2 & 0xF))) << 4);
+            const packed_byte = @as(u8, @bitCast(@as(i8, q1 & 0xF))) |
+                               (@as(u8, @bitCast(@as(i8, q2 & 0xF))) << 4);
 
-            data[block_start + 2 + pair_idx] = packed;
+            data[block_start + 2 + pair_idx] = packed_byte;
         }
     }
 
@@ -394,11 +395,11 @@ fn dequantizeQ4_0(quantized: QuantizedTensor(.Q4_0), result: *Tensor(f32)) !void
 
         // Dequantize weights in this block
         for (0..(elem_end - elem_start) / 2) |pair_idx| {
-            const packed = quantized.data[block_start + 2 + pair_idx];
+            const packed_byte = quantized.data[block_start + 2 + pair_idx];
 
             // Unpack two 4-bit values
-            const q1 = @as(i8, @bitCast(packed & 0xF));
-            const q2 = @as(i8, @bitCast((packed >> 4) & 0xF));
+            const q1 = @as(i8, @bitCast(packed_byte & 0xF));
+            const q2 = @as(i8, @bitCast((packed_byte >> 4) & 0xF));
 
             // Dequantize
             const val1 = (@as(f32, @floatFromInt(q1)) + 8.0) * scale;
@@ -475,8 +476,8 @@ test "Q4_0 quantization round-trip" {
     // Check reconstruction quality (allow some quantization error)
     var max_error: f32 = 0.0;
     for (0..original.size) |i| {
-        const error = @abs(original.data[i] - restored.data[i]);
-        max_error = @max(max_error, error);
+        const abs_error = @abs(original.data[i] - restored.data[i]);
+        max_error = @max(max_error, abs_error);
     }
 
     // Quantization error should be reasonable for 4-bit
@@ -505,8 +506,8 @@ test "Q8_0 quantization accuracy" {
     // Q8_0 should have much better accuracy than Q4_0
     var max_error: f32 = 0.0;
     for (0..original.size) |i| {
-        const error = @abs(original.data[i] - restored.data[i]);
-        max_error = @max(max_error, error);
+        const abs_error = @abs(original.data[i] - restored.data[i]);
+        max_error = @max(max_error, abs_error);
     }
 
     // 8-bit quantization should be very accurate
