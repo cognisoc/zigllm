@@ -13,12 +13,13 @@ pub fn build(b: *std.Build) void {
     // Individual test step for linear algebra
     const test_linear_algebra_step = b.step("test-linear-algebra", "Test linear algebra layer");
 
+    // Demo step (run directly with zig)
+    const demo_step = b.step("demo", "Run educational demo (use: zig run examples/educational_demo.zig)");
+
     // Placeholder for other commands
     _ = b.step("bench", "Run performance benchmarks");
 
     // Note unused variables to avoid warnings
-    _ = target;
-    _ = optimize;
     _ = test_step;
     _ = test_foundation_step;
     _ = test_linear_algebra_step;
