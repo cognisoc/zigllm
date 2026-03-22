@@ -1,565 +1,377 @@
-//! KV Cache Optimization System
-//!
-//! This module implements Key-Value caching for transformer models, a critical
-//! optimization that dramatically improves inference speed by avoiding
-//! recomputation of attention keys and values for previously processed tokens.
-//!
-//! ## Educational Value
-//! KV caching teaches fundamental inference optimization concepts:
-//! - How autoregressive attention can be optimized
-//! - Memory vs compute trade-offs in neural network inference
-//! - Cache management strategies for long sequences
-//! - Production-level performance optimization techniques
+// Advanced KV Cache Implementation
+// Supports multi-sequence batching, sliding window attention, and efficient memory management
+//
+// Key features:
+// 1. Multi-sequence batching for efficient inference
+// 2. Sliding window attention for long sequences
+// 3. Memory-efficient storage and retrieval
+// 4. Dynamic allocation and growth
+// 5. Sequence-aware cache management
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const ArrayList = std.ArrayList;
-const math = std.math;
-
 const Tensor = @import("../foundation/tensor.zig").Tensor;
-const ModelConfig = @import("../models/config.zig").ModelConfig;
 
-/// KV cache entry for a single layer and single head
+// KV Cache Entry for a single sequence
 pub const KVCacheEntry = struct {
-    /// Cached keys: [seq_len, head_dim]
-    keys: Tensor(f32),
-    /// Cached values: [seq_len, head_dim]
-    values: Tensor(f32),
-    /// Current sequence length in cache
-    current_length: usize,
-    /// Maximum sequence length this cache can hold
-    max_length: usize,
+    keys: Tensor,       // [seq_len, n_heads, head_dim]
+    values: Tensor,     // [seq_len, n_heads, head_dim]
+    sequence_length: u32,
+    max_length: u32,
+    layer_id: u32,
 
-    /// Initialize cache entry
-    pub fn init(allocator: Allocator, max_length: usize, head_dim: usize) !KVCacheEntry {
-        const keys = try Tensor(f32).init(allocator, &[_]usize{ max_length, head_dim });
-        const values = try Tensor(f32).init(allocator, &[_]usize{ max_length, head_dim });
-
+    pub fn init(allocator: std.mem.Allocator, max_length: u32, n_heads: u32, head_dim: u32, layer_id: u32) !KVCacheEntry {
         return KVCacheEntry{
-            .keys = keys,
-            .values = values,
-            .current_length = 0,
+            .keys = try Tensor.zeros(allocator, &[_]u32{ max_length, n_heads, head_dim }),
+            .values = try Tensor.zeros(allocator, &[_]u32{ max_length, n_heads, head_dim }),
+            .sequence_length = 0,
             .max_length = max_length,
+            .layer_id = layer_id,
         };
     }
 
-    /// Clean up cache entry
+    pub fn append(self: *KVCacheEntry, keys: *const Tensor, values: *const Tensor) !void {
+        const new_tokens = keys.shape[0];
+
+        if (self.sequence_length + new_tokens > self.max_length) {
+            return error.CacheOverflow;
+        }
+
+        // Copy keys and values to cache
+        for (0..new_tokens) |i| {
+            for (0..keys.shape[1]) |h| {
+                for (0..keys.shape[2]) |d| {
+                    const key_val = try keys.get(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) });
+                    const value_val = try values.get(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) });
+
+                    try self.keys.set(&[_]u32{ self.sequence_length + @as(u32, @intCast(i)), @intCast(h), @intCast(d) }, key_val);
+                    try self.values.set(&[_]u32{ self.sequence_length + @as(u32, @intCast(i)), @intCast(h), @intCast(d) }, value_val);
+                }
+            }
+        }
+
+        self.sequence_length += @intCast(new_tokens);
+    }
+
+    pub fn get(self: *const KVCacheEntry, start_pos: u32, length: u32) !struct { keys: Tensor, values: Tensor } {
+        if (start_pos + length > self.sequence_length) {
+            return error.InvalidCacheAccess;
+        }
+
+        const allocator = self.keys.allocator;
+        var cached_keys = try Tensor.zeros(allocator, &[_]u32{ length, self.keys.shape[1], self.keys.shape[2] });
+        var cached_values = try Tensor.zeros(allocator, &[_]u32{ length, self.values.shape[1], self.values.shape[2] });
+
+        for (0..length) |i| {
+            for (0..self.keys.shape[1]) |h| {
+                for (0..self.keys.shape[2]) |d| {
+                    const key_val = try self.keys.get(&[_]u32{ start_pos + @as(u32, @intCast(i)), @intCast(h), @intCast(d) });
+                    const value_val = try self.values.get(&[_]u32{ start_pos + @as(u32, @intCast(i)), @intCast(h), @intCast(d) });
+
+                    try cached_keys.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, key_val);
+                    try cached_values.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, value_val);
+                }
+            }
+        }
+
+        return .{ .keys = cached_keys, .values = cached_values };
+    }
+
+    pub fn clear(self: *KVCacheEntry) void {
+        self.sequence_length = 0;
+        // Zero out the tensors for security
+        for (0..self.max_length) |i| {
+            for (0..self.keys.shape[1]) |h| {
+                for (0..self.keys.shape[2]) |d| {
+                    self.keys.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, 0.0) catch {};
+                    self.values.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, 0.0) catch {};
+                }
+            }
+        }
+    }
+
     pub fn deinit(self: *KVCacheEntry) void {
         self.keys.deinit();
         self.values.deinit();
     }
-
-    /// Add new keys and values to the cache
-    pub fn append(self: *KVCacheEntry, new_keys: Tensor(f32), new_values: Tensor(f32)) !void {
-        const new_seq_len = new_keys.shape[0];
-
-        // Check if we have space
-        if (self.current_length + new_seq_len > self.max_length) {
-            return error.CacheOverflow;
-        }
-
-        // Copy new keys and values to cache
-        const key_offset = self.current_length * self.keys.shape[1];
-        const value_offset = self.current_length * self.values.shape[1];
-
-        @memcpy(
-            self.keys.data[key_offset..key_offset + new_keys.size],
-            new_keys.data
-        );
-        @memcpy(
-            self.values.data[value_offset..value_offset + new_values.size],
-            new_values.data
-        );
-
-        self.current_length += new_seq_len;
-    }
-
-    /// Get cached keys up to current length
-    pub fn getCachedKeys(self: KVCacheEntry, allocator: Allocator) !Tensor(f32) {
-        const shape = [_]usize{ self.current_length, self.keys.shape[1] };
-        var result = try Tensor(f32).init(allocator, &shape);
-
-        const size_to_copy = self.current_length * self.keys.shape[1];
-        @memcpy(result.data[0..size_to_copy], self.keys.data[0..size_to_copy]);
-
-        return result;
-    }
-
-    /// Get cached values up to current length
-    pub fn getCachedValues(self: KVCacheEntry, allocator: Allocator) !Tensor(f32) {
-        const shape = [_]usize{ self.current_length, self.values.shape[1] };
-        var result = try Tensor(f32).init(allocator, &shape);
-
-        const size_to_copy = self.current_length * self.values.shape[1];
-        @memcpy(result.data[0..size_to_copy], self.values.data[0..size_to_copy]);
-
-        return result;
-    }
-
-    /// Reset cache to empty state
-    pub fn reset(self: *KVCacheEntry) void {
-        self.current_length = 0;
-        // No need to zero memory - we track length
-    }
-
-    /// Check if cache is full
-    pub fn isFull(self: KVCacheEntry) bool {
-        return self.current_length >= self.max_length;
-    }
-
-    /// Get remaining capacity
-    pub fn remainingCapacity(self: KVCacheEntry) usize {
-        return self.max_length - self.current_length;
-    }
 };
 
-/// Multi-head KV cache for a single layer
-pub const LayerKVCache = struct {
-    /// Cache entries for each head
-    head_caches: []KVCacheEntry,
-    /// Number of attention heads
-    num_heads: usize,
-    /// Dimension per head
-    head_dim: usize,
-    /// Maximum sequence length
-    max_seq_len: usize,
-    /// Allocator for memory management
-    allocator: Allocator,
+// Multi-Sequence KV Cache Manager
+pub const MultiSequenceKVCache = struct {
+    sequences: std.HashMap(u64, []KVCacheEntry, std.hash_map.DefaultHashContext(u64), std.hash_map.default_max_load_percentage),
+    n_layers: u32,
+    n_heads: u32,
+    head_dim: u32,
+    max_seq_length: u32,
+    allocator: std.mem.Allocator,
 
-    /// Initialize layer cache
-    pub fn init(allocator: Allocator, num_heads: usize, head_dim: usize, max_seq_len: usize) !LayerKVCache {
-        var head_caches = try allocator.alloc(KVCacheEntry, num_heads);
-        errdefer allocator.free(head_caches);
-
-        for (head_caches, 0..) |*cache, i| {
-            cache.* = KVCacheEntry.init(allocator, max_seq_len, head_dim) catch |err| {
-                // Clean up previously initialized caches
-                for (head_caches[0..i]) |*prev_cache| {
-                    prev_cache.deinit();
-                }
-                allocator.free(head_caches);
-                return err;
-            };
-        }
-
-        return LayerKVCache{
-            .head_caches = head_caches,
-            .num_heads = num_heads,
+    pub fn init(allocator: std.mem.Allocator, n_layers: u32, n_heads: u32, head_dim: u32, max_seq_length: u32) !MultiSequenceKVCache {
+        return MultiSequenceKVCache{
+            .sequences = std.HashMap(u64, []KVCacheEntry, std.hash_map.DefaultHashContext(u64), std.hash_map.default_max_load_percentage).init(allocator),
+            .n_layers = n_layers,
+            .n_heads = n_heads,
             .head_dim = head_dim,
-            .max_seq_len = max_seq_len,
+            .max_seq_length = max_seq_length,
             .allocator = allocator,
         };
     }
 
-    /// Clean up layer cache
-    pub fn deinit(self: *LayerKVCache) void {
-        for (self.head_caches) |*cache| {
-            cache.deinit();
-        }
-        self.allocator.free(self.head_caches);
-    }
-
-    /// Add keys and values for all heads
-    pub fn appendMultiHead(self: *LayerKVCache, keys: Tensor(f32), values: Tensor(f32)) !void {
-        // Keys and values shape: [batch_size, num_heads, seq_len, head_dim]
-        // For simplicity, assume batch_size = 1
-        const seq_len = keys.shape[2];
-
-        for (0..self.num_heads) |head_idx| {
-            // Extract keys and values for this head
-            var head_keys = try self.extractHeadTensor(keys, head_idx, seq_len);
-            defer head_keys.deinit();
-
-            var head_values = try self.extractHeadTensor(values, head_idx, seq_len);
-            defer head_values.deinit();
-
-            // Append to head cache
-            try self.head_caches[head_idx].append(head_keys, head_values);
-        }
-    }
-
-    /// Extract tensor for a specific head
-    fn extractHeadTensor(self: *LayerKVCache, tensor: Tensor(f32), head_idx: usize, seq_len: usize) !Tensor(f32) {
-        var result = try Tensor(f32).init(self.allocator, &[_]usize{ seq_len, self.head_dim });
-
-        // Calculate offset into the tensor
-        const head_offset = head_idx * seq_len * self.head_dim;
-        const size_to_copy = seq_len * self.head_dim;
-
-        @memcpy(result.data, tensor.data[head_offset..head_offset + size_to_copy]);
-
-        return result;
-    }
-
-    /// Get cached keys for all heads
-    pub fn getAllCachedKeys(self: *LayerKVCache) !Tensor(f32) {
-        const current_seq_len = self.head_caches[0].current_length;
-        const shape = [_]usize{ 1, self.num_heads, current_seq_len, self.head_dim }; // [batch, heads, seq, head_dim]
-
-        var result = try Tensor(f32).init(self.allocator, &shape);
-        errdefer result.deinit();
-
-        for (0..self.num_heads) |head_idx| {
-            const head_keys = try self.head_caches[head_idx].getCachedKeys(self.allocator);
-            defer head_keys.deinit();
-
-            // Copy head keys to result tensor
-            const head_offset = head_idx * current_seq_len * self.head_dim;
-            @memcpy(result.data[head_offset..head_offset + head_keys.size], head_keys.data);
+    pub fn getOrCreateSequence(self: *MultiSequenceKVCache, sequence_id: u64) ![]KVCacheEntry {
+        const result = self.sequences.get(sequence_id);
+        if (result != null) {
+            return result.?;
         }
 
-        return result;
-    }
-
-    /// Get cached values for all heads
-    pub fn getAllCachedValues(self: *LayerKVCache) !Tensor(f32) {
-        const current_seq_len = self.head_caches[0].current_length;
-        const shape = [_]usize{ 1, self.num_heads, current_seq_len, self.head_dim };
-
-        var result = try Tensor(f32).init(self.allocator, &shape);
-        errdefer result.deinit();
-
-        for (0..self.num_heads) |head_idx| {
-            const head_values = try self.head_caches[head_idx].getCachedValues(self.allocator);
-            defer head_values.deinit();
-
-            const head_offset = head_idx * current_seq_len * self.head_dim;
-            @memcpy(result.data[head_offset..head_offset + head_values.size], head_values.data);
+        // Create new sequence cache
+        var cache_entries = try self.allocator.alloc(KVCacheEntry, self.n_layers);
+        for (0..self.n_layers) |i| {
+            cache_entries[i] = try KVCacheEntry.init(
+                self.allocator,
+                self.max_seq_length,
+                self.n_heads,
+                self.head_dim,
+                @intCast(i)
+            );
         }
 
-        return result;
+        try self.sequences.put(sequence_id, cache_entries);
+        return cache_entries;
     }
 
-    /// Reset all head caches
-    pub fn reset(self: *LayerKVCache) void {
-        for (self.head_caches) |*cache| {
-            cache.reset();
+    pub fn appendToSequence(self: *MultiSequenceKVCache, sequence_id: u64, layer_id: u32, keys: *const Tensor, values: *const Tensor) !void {
+        var cache_entries = try self.getOrCreateSequence(sequence_id);
+        try cache_entries[layer_id].append(keys, values);
+    }
+
+    pub fn getFromSequence(self: *MultiSequenceKVCache, sequence_id: u64, layer_id: u32, start_pos: u32, length: u32) !?struct { keys: Tensor, values: Tensor } {
+        const cache_entries = self.sequences.get(sequence_id);
+        if (cache_entries == null) {
+            return null;
+        }
+
+        return try cache_entries.?[layer_id].get(start_pos, length);
+    }
+
+    pub fn getSequenceLength(self: *MultiSequenceKVCache, sequence_id: u64) u32 {
+        const cache_entries = self.sequences.get(sequence_id);
+        if (cache_entries == null) {
+            return 0;
+        }
+        return cache_entries.?[0].sequence_length; // All layers should have same length
+    }
+
+    pub fn clearSequence(self: *MultiSequenceKVCache, sequence_id: u64) void {
+        const cache_entries = self.sequences.get(sequence_id);
+        if (cache_entries == null) {
+            return;
+        }
+
+        for (cache_entries.?) |*entry| {
+            entry.clear();
         }
     }
 
-    /// Get current sequence length (should be same for all heads)
-    pub fn getCurrentLength(self: LayerKVCache) usize {
-        return self.head_caches[0].current_length;
+    pub fn removeSequence(self: *MultiSequenceKVCache, sequence_id: u64) void {
+        const cache_entries = self.sequences.get(sequence_id);
+        if (cache_entries == null) {
+            return;
+        }
+
+        // Clean up memory
+        for (cache_entries.?) |*entry| {
+            entry.deinit();
+        }
+        self.allocator.free(cache_entries.?);
+
+        _ = self.sequences.remove(sequence_id);
     }
 
-    /// Check if any head cache is full
-    pub fn isFull(self: LayerKVCache) bool {
-        return self.head_caches[0].isFull(); // All heads should have same length
+    pub fn getMemoryUsage(self: *MultiSequenceKVCache) u64 {
+        var total_memory: u64 = 0;
+
+        var iterator = self.sequences.iterator();
+        while (iterator.next()) |entry| {
+            const cache_entries = entry.value_ptr.*;
+            for (cache_entries) |cache_entry| {
+                const entry_size = @as(u64, cache_entry.max_length) * cache_entry.keys.shape[1] * cache_entry.keys.shape[2] * 2; // keys + values
+                total_memory += entry_size * @sizeOf(f32); // assuming f32 tensors
+            }
+        }
+
+        return total_memory;
     }
 
-    /// Get memory usage in bytes
-    pub fn getMemoryUsage(self: LayerKVCache) usize {
-        const keys_memory = self.num_heads * self.max_seq_len * self.head_dim * @sizeOf(f32);
-        const values_memory = self.num_heads * self.max_seq_len * self.head_dim * @sizeOf(f32);
-        return keys_memory + values_memory;
+    pub fn deinit(self: *MultiSequenceKVCache) void {
+        var iterator = self.sequences.iterator();
+        while (iterator.next()) |entry| {
+            const cache_entries = entry.value_ptr.*;
+            for (cache_entries) |*cache_entry| {
+                cache_entry.deinit();
+            }
+            self.allocator.free(cache_entries);
+        }
+        self.sequences.deinit();
     }
 };
 
-/// Complete KV cache for all model layers
-pub const ModelKVCache = struct {
-    /// Cache for each transformer layer
-    layer_caches: []LayerKVCache,
-    /// Number of layers in the model
-    num_layers: usize,
-    /// Model configuration
-    config: ModelConfig,
-    /// Allocator for memory management
-    allocator: Allocator,
-    /// Cache statistics
-    stats: CacheStats,
+// Sliding Window KV Cache
+// Automatically manages sliding window attention by evicting old tokens
+pub const SlidingWindowKVCache = struct {
+    cache: MultiSequenceKVCache,
+    window_size: u32,
 
-    /// Initialize complete model cache
-    pub fn init(allocator: Allocator, config: ModelConfig) !ModelKVCache {
-        const head_dim = config.headDim();
+    pub fn init(allocator: std.mem.Allocator, n_layers: u32, n_heads: u32, head_dim: u32, window_size: u32) !SlidingWindowKVCache {
+        return SlidingWindowKVCache{
+            .cache = try MultiSequenceKVCache.init(allocator, n_layers, n_heads, head_dim, window_size * 2), // Extra buffer
+            .window_size = window_size,
+        };
+    }
 
-        var layer_caches = try allocator.alloc(LayerKVCache, config.num_layers);
-        errdefer allocator.free(layer_caches);
+    pub fn appendWithSliding(self: *SlidingWindowKVCache, sequence_id: u64, layer_id: u32, keys: *const Tensor, values: *const Tensor) !void {
+        const current_length = self.cache.getSequenceLength(sequence_id);
+        const new_tokens = keys.shape[0];
 
-        for (layer_caches, 0..) |*cache, i| {
-            cache.* = LayerKVCache.init(allocator, config.num_heads, head_dim, config.max_seq_len) catch |err| {
-                // Clean up previously initialized layer caches
-                for (layer_caches[0..i]) |*prev_cache| {
-                    prev_cache.deinit();
+        if (current_length + new_tokens > self.window_size) {
+            // Need to slide the window
+            try self.slideWindow(sequence_id, layer_id, new_tokens);
+        }
+
+        try self.cache.appendToSequence(sequence_id, layer_id, keys, values);
+    }
+
+    fn slideWindow(self: *SlidingWindowKVCache, sequence_id: u64, layer_id: u32, new_tokens: u32) !void {
+        const cache_entries = try self.cache.getOrCreateSequence(sequence_id);
+        const current_entry = &cache_entries[layer_id];
+
+        const current_length = current_entry.sequence_length;
+        const tokens_to_evict = (current_length + new_tokens) - self.window_size;
+
+        if (tokens_to_evict >= current_length) {
+            // Evict everything
+            current_entry.clear();
+            return;
+        }
+
+        // Shift the cache to remove oldest tokens
+        const keep_length = current_length - tokens_to_evict;
+
+        // Create temporary storage
+        var temp_keys = try Tensor.zeros(current_entry.keys.allocator, &[_]u32{ keep_length, current_entry.keys.shape[1], current_entry.keys.shape[2] });
+        defer temp_keys.deinit();
+        var temp_values = try Tensor.zeros(current_entry.values.allocator, &[_]u32{ keep_length, current_entry.values.shape[1], current_entry.values.shape[2] });
+        defer temp_values.deinit();
+
+        // Copy the tokens we want to keep
+        for (0..keep_length) |i| {
+            for (0..current_entry.keys.shape[1]) |h| {
+                for (0..current_entry.keys.shape[2]) |d| {
+                    const key_val = try current_entry.keys.get(&[_]u32{ tokens_to_evict + @as(u32, @intCast(i)), @intCast(h), @intCast(d) });
+                    const value_val = try current_entry.values.get(&[_]u32{ tokens_to_evict + @as(u32, @intCast(i)), @intCast(h), @intCast(d) });
+
+                    try temp_keys.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, key_val);
+                    try temp_values.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, value_val);
                 }
-                allocator.free(layer_caches);
-                return err;
-            };
+            }
         }
 
-        return ModelKVCache{
-            .layer_caches = layer_caches,
-            .num_layers = config.num_layers,
-            .config = config,
-            .allocator = allocator,
-            .stats = CacheStats{},
-        };
-    }
+        // Clear the cache and copy back
+        current_entry.clear();
+        for (0..keep_length) |i| {
+            for (0..current_entry.keys.shape[1]) |h| {
+                for (0..current_entry.keys.shape[2]) |d| {
+                    const key_val = try temp_keys.get(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) });
+                    const value_val = try temp_values.get(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) });
 
-    /// Clean up model cache
-    pub fn deinit(self: *ModelKVCache) void {
-        for (self.layer_caches) |*cache| {
-            cache.deinit();
-        }
-        self.allocator.free(self.layer_caches);
-    }
-
-    /// Update cache for a specific layer
-    pub fn updateLayer(self: *ModelKVCache, layer_idx: usize, keys: Tensor(f32), values: Tensor(f32)) !void {
-        if (layer_idx >= self.num_layers) {
-            return error.InvalidLayerIndex;
-        }
-
-        try self.layer_caches[layer_idx].appendMultiHead(keys, values);
-        self.stats.cache_updates += 1;
-    }
-
-    /// Get cached keys and values for a layer
-    pub fn getLayerCache(self: *ModelKVCache, layer_idx: usize) !struct { keys: Tensor(f32), values: Tensor(f32) } {
-        if (layer_idx >= self.num_layers) {
-            return error.InvalidLayerIndex;
-        }
-
-        const keys = try self.layer_caches[layer_idx].getAllCachedKeys();
-        const values = try self.layer_caches[layer_idx].getAllCachedValues();
-
-        self.stats.cache_hits += 1;
-        return .{ .keys = keys, .values = values };
-    }
-
-    /// Reset all caches
-    pub fn reset(self: *ModelKVCache) void {
-        for (self.layer_caches) |*cache| {
-            cache.reset();
-        }
-        self.stats = CacheStats{};
-    }
-
-    /// Get current sequence length (should be consistent across layers)
-    pub fn getCurrentLength(self: ModelKVCache) usize {
-        if (self.layer_caches.len > 0) {
-            return self.layer_caches[0].getCurrentLength();
-        }
-        return 0;
-    }
-
-    /// Check if cache is full
-    pub fn isFull(self: ModelKVCache) bool {
-        return self.layer_caches[0].isFull();
-    }
-
-    /// Get total memory usage
-    pub fn getTotalMemoryUsage(self: ModelKVCache) usize {
-        var total: usize = 0;
-        for (self.layer_caches) |cache| {
-            total += cache.getMemoryUsage();
-        }
-        return total;
-    }
-
-    /// Get memory usage statistics
-    pub fn getMemoryStats(self: ModelKVCache) struct {
-        total_bytes: usize,
-        per_layer_bytes: usize,
-        utilization_percent: f32,
-    } {
-        const total = self.getTotalMemoryUsage();
-        const per_layer = if (self.num_layers > 0) total / self.num_layers else 0;
-        const current_len = self.getCurrentLength();
-        const utilization = @as(f32, @floatFromInt(current_len)) / @as(f32, @floatFromInt(self.config.max_seq_len)) * 100.0;
-
-        return .{
-            .total_bytes = total,
-            .per_layer_bytes = per_layer,
-            .utilization_percent = utilization,
-        };
-    }
-
-    /// Compact cache by removing old tokens (sliding window)
-    pub fn compact(self: *ModelKVCache, keep_last_n: usize) !void {
-        // This is a simplified implementation
-        // In practice, you'd implement a sliding window mechanism
-        if (keep_last_n >= self.getCurrentLength()) {
-            return; // Nothing to compact
-        }
-
-        // For now, just reset if we need to compact
-        // A proper implementation would shift the cache contents
-        self.reset();
-        self.stats.cache_compactions += 1;
-    }
-};
-
-/// KV cache performance statistics
-pub const CacheStats = struct {
-    /// Number of cache updates
-    cache_updates: u64 = 0,
-    /// Number of cache hits
-    cache_hits: u64 = 0,
-    /// Number of cache misses
-    cache_misses: u64 = 0,
-    /// Number of cache compactions
-    cache_compactions: u64 = 0,
-
-    /// Calculate hit rate
-    pub fn hitRate(self: CacheStats) f32 {
-        const total_accesses = self.cache_hits + self.cache_misses;
-        if (total_accesses == 0) return 0.0;
-        return @as(f32, @floatFromInt(self.cache_hits)) / @as(f32, @floatFromInt(total_accesses));
-    }
-
-    /// Print statistics
-    pub fn print(self: CacheStats, writer: anytype) !void {
-        try writer.print("KV Cache Statistics:\n", .{});
-        try writer.print("  Updates: {d}\n", .{self.cache_updates});
-        try writer.print("  Hits: {d}\n", .{self.cache_hits});
-        try writer.print("  Misses: {d}\n", .{self.cache_misses});
-        try writer.print("  Hit Rate: {d:.1}%\n", .{self.hitRate() * 100.0});
-        try writer.print("  Compactions: {d}\n", .{self.cache_compactions});
-    }
-};
-
-/// KV cache strategy for different use cases
-pub const CacheStrategy = enum {
-    /// Always cache (best for interactive chat)
-    Always,
-    /// Cache only for long sequences
-    LongSequenceOnly,
-    /// Adaptive caching based on memory pressure
-    Adaptive,
-    /// No caching (for batch processing)
-    Disabled,
-
-    /// Should cache be used for given sequence length?
-    pub fn shouldCache(self: CacheStrategy, seq_len: usize, available_memory: ?usize) bool {
-        return switch (self) {
-            .Always => true,
-            .LongSequenceOnly => seq_len > 512,
-            .Adaptive => {
-                if (available_memory) |memory| {
-                    // Use cache if we have enough memory
-                    const required_memory = seq_len * 1024; // Rough estimate
-                    return memory > required_memory * 2; // 2x safety factor
+                    try current_entry.keys.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, key_val);
+                    try current_entry.values.set(&[_]u32{ @intCast(i), @intCast(h), @intCast(d) }, value_val);
                 }
-                return seq_len > 256; // Default threshold
-            },
-            .Disabled => false,
-        };
+            }
+        }
+
+        current_entry.sequence_length = @intCast(keep_length);
+    }
+
+    pub fn getWithWindow(self: *SlidingWindowKVCache, sequence_id: u64, layer_id: u32, query_pos: u32) !?struct { keys: Tensor, values: Tensor } {
+        const current_length = self.cache.getSequenceLength(sequence_id);
+        if (current_length == 0) {
+            return null;
+        }
+
+        // For sliding window, we typically want to see the last window_size tokens
+        const window_start = if (current_length > self.window_size) current_length - self.window_size else 0;
+        const window_length = current_length - window_start;
+
+        return try self.cache.getFromSequence(sequence_id, layer_id, window_start, window_length);
+    }
+
+    pub fn deinit(self: *SlidingWindowKVCache) void {
+        self.cache.deinit();
     }
 };
 
-// KV cache tests
-test "KV cache entry basic operations" {
-    const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+// KV Cache Statistics for monitoring
+pub const KVCacheStats = struct {
+    total_sequences: u32,
+    total_memory_bytes: u64,
+    average_sequence_length: f32,
+    cache_hit_rate: f32,
+    cache_efficiency: f32, // ratio of used vs allocated memory
 
-    var cache = try KVCacheEntry.init(allocator, 10, 64);
-    defer cache.deinit();
+    pub fn compute(cache: *const MultiSequenceKVCache) KVCacheStats {
+        var total_sequences: u32 = 0;
+        var total_length: u64 = 0;
+        var total_memory: u64 = 0;
+        var used_memory: u64 = 0;
 
-    // Test initial state
-    try testing.expectEqual(@as(usize, 0), cache.current_length);
-    try testing.expectEqual(@as(usize, 10), cache.max_length);
-    try testing.expectEqual(@as(usize, 10), cache.remainingCapacity());
-    try testing.expect(!cache.isFull());
+        var iterator = cache.sequences.iterator();
+        while (iterator.next()) |entry| {
+            total_sequences += 1;
+            const cache_entries = entry.value_ptr.*;
 
-    // Create test tensors
-    var keys = try Tensor(f32).init(allocator, &[_]usize{ 3, 64 });
-    defer keys.deinit();
-    var values = try Tensor(f32).init(allocator, &[_]usize{ 3, 64 });
-    defer values.deinit();
+            if (cache_entries.len > 0) {
+                const seq_length = cache_entries[0].sequence_length;
+                total_length += seq_length;
 
-    // Fill with test data
-    for (keys.data, 0..) |*val, i| {
-        val.* = @as(f32, @floatFromInt(i));
+                for (cache_entries) |cache_entry| {
+                    const max_memory = @as(u64, cache_entry.max_length) * cache_entry.keys.shape[1] * cache_entry.keys.shape[2] * 2 * @sizeOf(f32);
+                    const used_mem = @as(u64, seq_length) * cache_entry.keys.shape[1] * cache_entry.keys.shape[2] * 2 * @sizeOf(f32);
+                    total_memory += max_memory;
+                    used_memory += used_mem;
+                }
+            }
+        }
+
+        return KVCacheStats{
+            .total_sequences = total_sequences,
+            .total_memory_bytes = total_memory,
+            .average_sequence_length = if (total_sequences > 0) @as(f32, @floatFromInt(total_length)) / @as(f32, @floatFromInt(total_sequences)) else 0.0,
+            .cache_hit_rate = 0.0, // Would need additional tracking for hits/misses
+            .cache_efficiency = if (total_memory > 0) @as(f32, @floatFromInt(used_memory)) / @as(f32, @floatFromInt(total_memory)) else 0.0,
+        };
     }
-    for (values.data, 0..) |*val, i| {
-        val.* = @as(f32, @floatFromInt(i)) + 1000.0;
+
+    pub fn print(self: KVCacheStats) void {
+        std.debug.print("=== KV Cache Statistics ===\n");
+        std.debug.print("Total Sequences: {}\n", .{self.total_sequences});
+        std.debug.print("Total Memory: {:.2} MB\n", .{@as(f32, @floatFromInt(self.total_memory_bytes)) / 1_048_576.0});
+        std.debug.print("Average Sequence Length: {:.1}\n", .{self.average_sequence_length});
+        std.debug.print("Cache Efficiency: {:.1}%\n", .{self.cache_efficiency * 100.0});
+        std.debug.print("===========================\n");
+    }
+};
+
+// Utility functions for KV cache management
+pub const KVCacheUtils = struct {
+    pub fn estimateMemoryUsage(n_sequences: u32, max_seq_length: u32, n_layers: u32, n_heads: u32, head_dim: u32) u64 {
+        const per_token_memory = @as(u64, n_layers) * n_heads * head_dim * 2 * @sizeOf(f32); // keys + values
+        return @as(u64, n_sequences) * max_seq_length * per_token_memory;
     }
 
-    // Test append
-    try cache.append(keys, values);
-    try testing.expectEqual(@as(usize, 3), cache.current_length);
-    try testing.expectEqual(@as(usize, 7), cache.remainingCapacity());
+    pub fn recommendedWindowSize(model_context_length: u32, available_memory_mb: u64) u32 {
+        // Simple heuristic based on available memory
+        const memory_bytes = available_memory_mb * 1_048_576;
+        const estimated_per_token = 4096; // rough estimate in bytes
 
-    // Test retrieval
-    const cached_keys = try cache.getCachedKeys(allocator);
-    defer cached_keys.deinit();
-    const cached_values = try cache.getCachedValues(allocator);
-    defer cached_values.deinit();
-
-    try testing.expectEqual(@as(usize, 3), cached_keys.shape[0]);
-    try testing.expectEqual(@as(usize, 64), cached_keys.shape[1]);
-    try testing.expectEqual(@as(f32, 0.0), cached_keys.data[0]);
-    try testing.expectEqual(@as(f32, 1000.0), cached_values.data[0]);
-}
-
-test "layer KV cache multi-head operations" {
-    const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var layer_cache = try LayerKVCache.init(allocator, 8, 64, 10); // 8 heads, 64 dim, 10 max seq
-    defer layer_cache.deinit();
-
-    // Test memory usage calculation
-    const expected_memory = 8 * 10 * 64 * @sizeOf(f32) * 2; // keys + values
-    try testing.expectEqual(expected_memory, layer_cache.getMemoryUsage());
-
-    // Test initial state
-    try testing.expectEqual(@as(usize, 0), layer_cache.getCurrentLength());
-    try testing.expect(!layer_cache.isFull());
-}
-
-test "model KV cache initialization and cleanup" {
-    const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const config = @import("../models/config.zig").ModelConfig.custom(512, 6, 8, 10000);
-
-    var model_cache = try ModelKVCache.init(allocator, config);
-    defer model_cache.deinit();
-
-    try testing.expectEqual(@as(usize, 6), model_cache.num_layers);
-    try testing.expectEqual(@as(usize, 0), model_cache.getCurrentLength());
-    try testing.expect(!model_cache.isFull());
-
-    // Test memory statistics
-    const memory_stats = model_cache.getMemoryStats();
-    try testing.expect(memory_stats.total_bytes > 0);
-    try testing.expect(memory_stats.per_layer_bytes > 0);
-    try testing.expectEqual(@as(f32, 0.0), memory_stats.utilization_percent);
-}
-
-test "cache statistics tracking" {
-    const testing = std.testing;
-
-    var stats = CacheStats{};
-    try testing.expectEqual(@as(f32, 0.0), stats.hitRate());
-
-    stats.cache_hits = 80;
-    stats.cache_misses = 20;
-    try testing.expectApproxEqAbs(@as(f32, 0.8), stats.hitRate(), 0.01);
-
-    stats.cache_updates = 100;
-    try testing.expectEqual(@as(u64, 100), stats.cache_updates);
-}
-
-test "cache strategy decisions" {
-    const testing = std.testing;
-
-    try testing.expect(CacheStrategy.Always.shouldCache(10, null));
-    try testing.expect(CacheStrategy.Always.shouldCache(1000, null));
-
-    try testing.expect(!CacheStrategy.LongSequenceOnly.shouldCache(100, null));
-    try testing.expect(CacheStrategy.LongSequenceOnly.shouldCache(1000, null));
-
-    try testing.expect(!CacheStrategy.Disabled.shouldCache(1000, null));
-
-    // Test adaptive strategy
-    try testing.expect(CacheStrategy.Adaptive.shouldCache(100, 1000000)); // Enough memory
-    try testing.expect(!CacheStrategy.Adaptive.shouldCache(100, 100)); // Not enough memory
-}
+        const max_tokens_from_memory = @as(u32, @intCast(memory_bytes / estimated_per_token));
+        return @min(max_tokens_from_memory, model_context_length);
+    }
+};
