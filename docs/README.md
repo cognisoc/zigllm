@@ -4,6 +4,25 @@
 
 Welcome to the ZigLlama documentation! This is a comprehensive learning resource that will take you from basic tensor operations to a complete LLaMA implementation.
 
+## 🚀 **Start Learning Now**
+
+| Quick Path | Description | Time |
+|------------|-------------|------|
+| 🏃 [**Quick Tour**](../README.md#quick-start) | See the big picture first | 30 min |
+| 📚 [**Complete Journey**](01-foundations/) | Step-by-step learning path | 1-2 weeks |
+| 🔍 [**Browse Code**](../src/) | Explore implementation directly | Variable |
+
+## 📍 **Learning Navigation**
+
+| Step | Topic | Documentation | Key Source Files | Try It |
+|------|-------|---------------|------------------|--------|
+| **1** | Tensors & Memory | [📖 Foundations](01-foundations/) | [`tensor.zig`](../src/foundation/tensor.zig) | `zig test ../src/foundation/` |
+| **2** | SIMD & Quantization | [📖 Linear Algebra](02-linear-algebra/) | [`matrix_ops.zig`](../src/linear_algebra/matrix_ops.zig) | `zig test ../src/linear_algebra/` |
+| **3** | Activations & Norms | [📖 Neural Primitives](03-neural-primitives/) | [`activations.zig`](../src/neural_primitives/activations.zig) | `zig test ../src/neural_primitives/` |
+| **4** | Attention & FFN | [📖 Transformers](04-transformers/) | [`attention.zig`](../src/transformers/attention.zig) | `zig test ../src/transformers/` |
+| **5** | LLaMA Architecture | [📖 Models](05-models/) | [`llama.zig`](../src/models/llama.zig) | `zig test ../src/models/` |
+| **6** | Text Generation | [📖 Inference](06-inference/) | [`generation.zig`](../src/inference/generation.zig) | `zig test ../src/inference/` |
+
 ## 🎯 How to Use This Documentation
 
 This documentation is designed as a **progressive learning experience**:
@@ -23,39 +42,39 @@ This documentation is designed as a **progressive learning experience**:
 - Connection to transformer architecture
 
 ### [02 - Linear Algebra](02-linear-algebra/)
-**Coming Soon!** SIMD optimizations and quantization techniques.
+**SIMD optimizations and quantization techniques** - [`src/linear_algebra/`](../src/linear_algebra/)
 - Optimized matrix operations using SIMD instructions
-- Quantization: FP16, INT8, and custom formats
+- K-quantization and IQ-quantization (18+ formats)
 - Memory alignment and cache optimization
 - Performance analysis and benchmarking
 
 ### [03 - Neural Primitives](03-neural-primitives/)
-**Coming Soon!** Activation functions and normalization layers.
-- Activation functions: ReLU, GELU, SwiGLU
-- Normalization: LayerNorm, RMSNorm
+**Activation functions and normalization layers** - [`src/neural_primitives/`](../src/neural_primitives/)
+- Modern activations: ReLU, GELU, SwiGLU, GeGLU
+- Normalization: LayerNorm, RMSNorm, BatchNorm
 - Dropout and regularization techniques
-- Embedding layers and positional encodings
+- Embedding layers and RoPE positional encodings
 
 ### [04 - Transformers](04-transformers/)
-**Coming Soon!** The heart of modern LLMs.
-- Multi-head attention mechanism
+**The heart of modern LLMs** - [`src/transformers/`](../src/transformers/)
+- Multi-head attention mechanism with RoPE
 - Scaled dot-product attention mathematics
-- Feed-forward networks and residual connections
+- Feed-forward networks with SwiGLU/GeGLU
 - Complete transformer block implementation
 
 ### [05 - Models](05-models/)
-**Coming Soon!** Complete LLaMA architecture.
-- LLaMA model architecture and configuration
-- Model loading and GGUF format support
-- Weight initialization and parameter management
-- Model serialization and checkpointing
+**Complete model architectures (18 families)** - [`src/models/`](../src/models/)
+- LLaMA, GPT-2, Mistral, Falcon, Qwen, Phi architectures
+- GGUF format support and model loading
+- Advanced components: MoE, Multi-modal, BERT, Mamba
+- Tokenization and chat templates
 
 ### [06 - Inference](06-inference/)
-**Coming Soon!** Text generation and optimization.
-- Autoregressive generation and sampling
-- KV-cache optimization for efficiency
-- Batching and parallel inference
-- Advanced generation techniques
+**Text generation and optimization** - [`src/inference/`](../src/inference/)
+- Advanced sampling strategies (8 methods)
+- KV-cache optimization for >95% speedup
+- Grammar constraints and streaming generation
+- Batch processing and performance profiling
 
 ## 🎓 Learning Features
 
@@ -91,20 +110,35 @@ Deep dives into computational complexity, memory usage, and optimization opportu
 
 ## 🔧 Hands-On Learning
 
-### Running Examples
+### 🚀 Try It Now
 ```bash
-# Start with the foundation demo
-zig build run
+# Quick demo - see the full system in action
+zig run examples/simple_demo.zig
 
-# Run comprehensive tests
+# Test your understanding as you learn
+zig test src/foundation/tensor.zig        # Layer 1
+zig test src/linear_algebra/matrix_ops.zig # Layer 2
+zig test src/neural_primitives/            # Layer 3
+zig test src/transformers/                 # Layer 4
+zig test src/models/llama.zig             # Layer 5
+zig test src/inference/generation.zig     # Layer 6
+
+# Run all 285+ tests
 zig build test
 
-# Try educational examples
-zig build run-examples
-
-# Run performance benchmarks
-zig build bench
+# Explore live examples
+zig run examples/educational_demo.zig     # Progressive concepts
+zig run examples/model_architectures_demo.zig # 18 architectures
 ```
+
+### 🎯 Interactive Learning
+Each layer includes **hands-on exercises**:
+- **Foundation**: Create and manipulate tensors
+- **Linear Algebra**: Benchmark SIMD optimizations
+- **Neural Primitives**: Test activation functions
+- **Transformers**: Implement attention from scratch
+- **Models**: Load and configure LLaMA models
+- **Inference**: Generate text with different strategies
 
 ### Code Navigation
 ```

@@ -1,6 +1,19 @@
 # Foundation Layer - Learning Guide
 
+**🏠 [Home](../../README.md) → 📚 [Docs](../README.md) → 🧮 Foundation Layer**
+
+---
+
 The foundation layer provides the fundamental building blocks for all transformer operations. This is where we learn about tensors, memory management, and basic mathematical operations that form the backbone of neural networks.
+
+## 🚀 Quick Start
+```bash
+# Try tensors in action
+zig test ../../src/foundation/tensor.zig
+
+# See practical examples
+zig run ../../examples/simple_demo.zig
+```
 
 ## Learning Objectives
 
@@ -104,13 +117,18 @@ Our comprehensive test suite covers:
 3. **Performance Tests**: Ensure operations scale as expected
 4. **Educational Tests**: Demonstrate transformer-relevant usage patterns
 
-## Next Steps
+## 🎯 Next Steps
 
 Once you understand tensors and basic operations:
 
-1. **Linear Algebra Layer**: SIMD optimizations and quantization
-2. **Neural Primitives**: Activation functions and normalization
-3. **Transformer Components**: Attention mechanisms and feed-forward networks
+### ➡️ [**Linear Algebra Layer**](../02-linear-algebra/)
+SIMD optimizations and quantization - [`src/linear_algebra/`](../../src/linear_algebra/)
+
+### ➡️ [**Neural Primitives**](../03-neural-primitives/)
+Activation functions and normalization - [`src/neural_primitives/`](../../src/neural_primitives/)
+
+### ➡️ [**Full Learning Path**](../README.md#learning-navigation)
+See all 6 layers with direct links to source code
 
 ## Hands-On Practice
 

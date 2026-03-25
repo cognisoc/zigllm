@@ -114,26 +114,27 @@ pub fn main() !void {
 }
 ```
 
-## 📚 **Learning Path**
+## 🚀 **Start Learning Now**
 
-### 🏃‍♂️ **Quick Learner** (2-4 hours)
-1. Start with [`docs/01-foundations/`](docs/01-foundations/) - understand tensors and basic operations
-2. Jump to [`docs/04-transformers/`](docs/04-transformers/) - see how attention mechanisms work
-3. Explore [`docs/06-inference/`](docs/06-inference/) - discover modern optimization techniques
+### → [**📍 Complete Learning Guide**](docs/README.md)
+*Navigate the full educational journey with step-by-step progression*
 
-### 🔬 **Deep Dive** (1-2 weeks)
-1. **Foundation Layer**: Master tensor operations and memory management
-2. **Linear Algebra Layer**: Understand SIMD optimization and quantization
-3. **Neural Primitives Layer**: Learn modern activations and normalization techniques
-4. **Transformers Layer**: Implement complete attention mechanisms and feed-forward networks
-5. **Models Layer**: Build full LLaMA architecture with model loading
-6. **Inference Layer**: Add production optimizations and text generation
+### → [**🏃 Quick 30-Minute Tour**](#quick-start)
+*Get the big picture before diving deep*
 
-### 👨‍🏫 **Teaching Resource** (Course material)
-- Each layer includes **comprehensive documentation** with mathematical foundations
-- **285+ tests** serve as executable specifications covering 18 model architectures
-- **Progressive complexity** allows customized learning paths from basic tensors to advanced multi-modal systems
-- **Real-world patterns** demonstrate production engineering practices at scale
+### → [**🔍 Browse Implementation**](src/)
+*Explore the source code directly*
+
+---
+
+## 📍 **Quick Navigation**
+
+| Learning Style | Path | Time Commitment |
+|----------------|------|----------------|
+| **🏃 Fast Track** | [Foundations](docs/01-foundations/) → [Transformers](docs/04-transformers/) → [Inference](docs/06-inference/) | 2-4 hours |
+| **🔬 Complete Journey** | [Layer 1](docs/01-foundations/) → [Layer 2](docs/02-linear-algebra/) → ... → [Layer 6](docs/06-inference/) | 1-2 weeks |
+| **👨‍🏫 Teaching Resource** | [Full Documentation](docs/) + [285+ Tests](tests/) + [18 Architectures](src/models/) | Course material |
+| **🔧 Implementation Focus** | [Source Code](src/) + [Examples](examples/) + [Tests](tests/) | Variable |
 
 ## 🧬 **Model Architectures**
 
