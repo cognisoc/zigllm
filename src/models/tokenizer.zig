@@ -167,6 +167,7 @@ pub const Vocabulary = struct {
     pub fn loadSentencePiece(self: *Vocabulary, file_path: []const u8) !void {
         // TODO: Implement SentencePiece model loading
         // This would parse the protobuf format used by SentencePiece
+        _ = self;
         _ = file_path;
         return error.NotImplemented;
     }
@@ -352,6 +353,278 @@ pub const SimpleTokenizer = struct {
     }
 };
 
+/// BPE (Byte Pair Encoding) Tokenizer
+///
+/// ## Educational Note: Subword Tokenization
+/// BPE is the standard tokenization for LLaMA models. It works by:
+/// 1. Starting with individual characters/bytes
+/// 2. Iteratively merging the most frequent adjacent pairs
+/// 3. Building a vocabulary of common subword units
+///
+/// This gives a balance between character-level (no OOV) and word-level (semantic) tokens.
+pub const BPETokenizer = struct {
+    /// Vocabulary (reuses existing Vocabulary struct)
+    vocabulary: Vocabulary,
+    /// Memory allocator
+    allocator: Allocator,
+    /// Merge pairs ordered by rank (lower rank = higher priority)
+    merges: ArrayList(MergePair),
+    /// Fast lookup: "left right" → merge rank
+    merge_ranks: HashMap([]const u8, u32, StringContext, std.hash_map.default_max_load_percentage),
+
+    const StringContext = struct {
+        pub fn hash(self: @This(), s: []const u8) u64 {
+            _ = self;
+            return std.hash_map.hashString(s);
+        }
+
+        pub fn eql(self: @This(), a: []const u8, b: []const u8) bool {
+            _ = self;
+            return std.mem.eql(u8, a, b);
+        }
+    };
+
+    pub const MergePair = struct {
+        left: []const u8,
+        right: []const u8,
+        rank: u32,
+    };
+
+    /// Initialize BPE tokenizer
+    pub fn init(allocator: Allocator, vocab_size: usize) !BPETokenizer {
+        return BPETokenizer{
+            .vocabulary = try Vocabulary.init(allocator, vocab_size),
+            .allocator = allocator,
+            .merges = ArrayList(MergePair).init(allocator),
+            .merge_ranks = HashMap([]const u8, u32, StringContext, std.hash_map.default_max_load_percentage).init(allocator),
+        };
+    }
+
+    /// Clean up resources
+    pub fn deinit(self: *BPETokenizer) void {
+        // Free merge rank keys (owned strings)
+        var rank_iter = self.merge_ranks.iterator();
+        while (rank_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.merge_ranks.deinit();
+
+        // Free merge pair strings
+        for (self.merges.items) |merge| {
+            self.allocator.free(merge.left);
+            self.allocator.free(merge.right);
+        }
+        self.merges.deinit();
+
+        self.vocabulary.deinit();
+    }
+
+    /// Add a merge rule. Rank determines priority (lower = merged first).
+    pub fn addMerge(self: *BPETokenizer, left: []const u8, right: []const u8, rank: u32) !void {
+        const owned_left = try self.allocator.dupe(u8, left);
+        errdefer self.allocator.free(owned_left);
+        const owned_right = try self.allocator.dupe(u8, right);
+        errdefer self.allocator.free(owned_right);
+
+        try self.merges.append(MergePair{
+            .left = owned_left,
+            .right = owned_right,
+            .rank = rank,
+        });
+
+        // Build key "left right" for fast lookup
+        const key = try std.fmt.allocPrint(self.allocator, "{s} {s}", .{ left, right });
+        errdefer self.allocator.free(key);
+        try self.merge_ranks.put(key, rank);
+    }
+
+    /// Encode text to token IDs using BPE algorithm
+    ///
+    /// ## Algorithm
+    /// 1. Replace spaces with SentencePiece marker (▁ = U+2581)
+    /// 2. Split into UTF-8 characters as initial symbols
+    /// 3. Repeatedly merge the pair with lowest rank
+    /// 4. Look up each resulting symbol in vocabulary
+    /// 5. Wrap with BOS and EOS tokens
+    pub fn encode(self: *const BPETokenizer, text: []const u8) ![]TokenId {
+        var tokens = ArrayList(TokenId).init(self.allocator);
+        errdefer tokens.deinit();
+
+        // Add BOS
+        try tokens.append(SpecialTokens.BOS);
+
+        if (text.len == 0) {
+            try tokens.append(SpecialTokens.EOS);
+            return try tokens.toOwnedSlice();
+        }
+
+        // Step 1: Prepare text — replace spaces with ▁ (SentencePiece style)
+        var prepared = ArrayList(u8).init(self.allocator);
+        defer prepared.deinit();
+
+        // Prepend ▁ for SentencePiece convention
+        try prepared.appendSlice("\xe2\x96\x81"); // ▁ in UTF-8
+
+        for (text) |c| {
+            if (c == ' ') {
+                try prepared.appendSlice("\xe2\x96\x81"); // ▁
+            } else {
+                try prepared.append(c);
+            }
+        }
+
+        // Step 2: Split into initial UTF-8 characters
+        var symbols = ArrayList([]const u8).init(self.allocator);
+        defer {
+            for (symbols.items) |sym| {
+                self.allocator.free(sym);
+            }
+            symbols.deinit();
+        }
+
+        var pos: usize = 0;
+        while (pos < prepared.items.len) {
+            const byte = prepared.items[pos];
+            const char_len: usize = if (byte < 0x80) 1 else if (byte < 0xE0) 2 else if (byte < 0xF0) 3 else 4;
+            const end = @min(pos + char_len, prepared.items.len);
+            const sym = try self.allocator.dupe(u8, prepared.items[pos..end]);
+            try symbols.append(sym);
+            pos = end;
+        }
+
+        // Step 3: BPE merge loop — repeatedly merge lowest-rank pair
+        while (symbols.items.len > 1) {
+            // Find the pair with lowest merge rank
+            var best_rank: u32 = std.math.maxInt(u32);
+            var best_idx: ?usize = null;
+
+            for (0..symbols.items.len - 1) |i| {
+                const key = try std.fmt.allocPrint(self.allocator, "{s} {s}", .{ symbols.items[i], symbols.items[i + 1] });
+                defer self.allocator.free(key);
+
+                if (self.merge_ranks.get(key)) |rank| {
+                    if (rank < best_rank) {
+                        best_rank = rank;
+                        best_idx = i;
+                    }
+                }
+            }
+
+            // No more merges possible
+            if (best_idx == null) break;
+
+            const idx = best_idx.?;
+
+            // Merge: concatenate symbols[idx] and symbols[idx+1]
+            const merged = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ symbols.items[idx], symbols.items[idx + 1] });
+
+            // Free old symbols
+            self.allocator.free(symbols.items[idx]);
+            self.allocator.free(symbols.items[idx + 1]);
+
+            // Replace idx with merged, remove idx+1
+            symbols.items[idx] = merged;
+            _ = symbols.orderedRemove(idx + 1);
+        }
+
+        // Step 4: Look up each symbol in vocabulary
+        for (symbols.items) |sym| {
+            if (self.vocabulary.getTokenId(sym)) |id| {
+                try tokens.append(id);
+            } else {
+                try tokens.append(SpecialTokens.UNK);
+            }
+        }
+
+        // Add EOS
+        try tokens.append(SpecialTokens.EOS);
+
+        return try tokens.toOwnedSlice();
+    }
+
+    /// Decode token IDs back to text
+    ///
+    /// Converts token IDs → pieces via vocabulary lookup, concatenates,
+    /// and replaces ▁ with spaces.
+    pub fn decode(self: *const BPETokenizer, token_ids: []const TokenId) ![]u8 {
+        var result = ArrayList(u8).init(self.allocator);
+        errdefer result.deinit();
+
+        for (token_ids) |id| {
+            // Skip BOS and EOS
+            if (id == SpecialTokens.BOS or id == SpecialTokens.EOS or id == SpecialTokens.PAD) {
+                continue;
+            }
+
+            if (id == SpecialTokens.UNK) {
+                try result.appendSlice("<unk>");
+                continue;
+            }
+
+            if (self.vocabulary.getTokenPiece(id)) |piece| {
+                try result.appendSlice(piece.piece);
+            }
+        }
+
+        // Replace ▁ (U+2581, UTF-8: E2 96 81) with space, strip leading space
+        var final = ArrayList(u8).init(self.allocator);
+        errdefer final.deinit();
+
+        var i: usize = 0;
+        while (i < result.items.len) {
+            if (i + 2 < result.items.len and
+                result.items[i] == 0xE2 and
+                result.items[i + 1] == 0x96 and
+                result.items[i + 2] == 0x81)
+            {
+                // Replace ▁ with space (skip leading)
+                if (final.items.len > 0) {
+                    try final.append(' ');
+                }
+                i += 3;
+            } else {
+                try final.append(result.items[i]);
+                i += 1;
+            }
+        }
+
+        result.deinit();
+        return try final.toOwnedSlice();
+    }
+
+    /// Load vocabulary and merges from GGUF metadata arrays
+    pub fn loadFromGGUF(
+        self: *BPETokenizer,
+        token_pieces: []const []const u8,
+        token_scores: ?[]const f32,
+        merge_rules: ?[]const []const u8,
+    ) !void {
+        // Add tokens to vocabulary
+        for (token_pieces, 0..) |piece, i| {
+            const id: TokenId = @intCast(i);
+            const score: f32 = if (token_scores) |scores| (if (i < scores.len) scores[i] else 0.0) else 0.0;
+            const is_special = id <= 3;
+
+            // Skip if already added (special tokens)
+            if (self.vocabulary.getTokenId(piece) != null) continue;
+
+            try self.vocabulary.addToken(piece, score, id, is_special);
+        }
+
+        // Add merge rules
+        if (merge_rules) |merges| {
+            for (merges, 0..) |rule, rank| {
+                // Merge rule format: "left right" (space-separated)
+                if (std.mem.indexOf(u8, rule, " ")) |space_pos| {
+                    const left = rule[0..space_pos];
+                    const right = rule[space_pos + 1 ..];
+                    try self.addMerge(left, right, @intCast(rank));
+                }
+            }
+        }
+    }
+};
+
 /// Tokenizer statistics for analysis and debugging
 pub const TokenizerStats = struct {
     vocab_size: usize,
@@ -501,7 +774,7 @@ test "tokenizer statistics" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var vocab = try Vocabulary.createSimpleVocab(allocator);
+    const vocab = try Vocabulary.createSimpleVocab(allocator);
     var tokenizer = SimpleTokenizer.initWithVocab(vocab, allocator);
     defer tokenizer.deinit();
 
@@ -512,4 +785,149 @@ test "tokenizer statistics" {
     try testing.expect(stats.avg_tokens_per_text > 0);
     try testing.expect(stats.unknown_token_rate >= 0.0);
     try testing.expect(stats.special_token_count > 0);
+}
+
+test "BPE tokenizer encode/decode round-trip" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var bpe = try BPETokenizer.init(allocator, 100);
+    defer bpe.deinit();
+
+    // Build vocabulary with all intermediate merge results
+    // ▁ = U+2581 = 0xE2 0x96 0x81 in UTF-8 (3 bytes: \xe2, \x96, \x81)
+    // Initial UTF-8 chars from "hello" → ▁, h, e, l, l, o
+    // Note: ▁ is a single UTF-8 char (3 bytes) — split correctly
+
+    // Individual characters (initial symbols)
+    try bpe.vocabulary.addToken("\xe2\x96\x81", -10.0, 4, false); // ▁
+    try bpe.vocabulary.addToken("h", -10.0, 5, false);
+    try bpe.vocabulary.addToken("e", -10.0, 6, false);
+    try bpe.vocabulary.addToken("l", -10.0, 7, false);
+    try bpe.vocabulary.addToken("o", -10.0, 8, false);
+
+    // Merge results
+    try bpe.vocabulary.addToken("\xe2\x96\x81h", -5.0, 9, false);    // ▁ + h
+    try bpe.vocabulary.addToken("ll", -5.0, 10, false);              // l + l
+    try bpe.vocabulary.addToken("llo", -4.0, 11, false);             // ll + o
+    try bpe.vocabulary.addToken("\xe2\x96\x81he", -3.0, 12, false);  // ▁h + e
+    try bpe.vocabulary.addToken("\xe2\x96\x81hello", -1.0, 13, false); // ▁he + llo
+
+    // Add merges in priority order (lower rank = merge first)
+    try bpe.addMerge("\xe2\x96\x81", "h", 0); // ▁ + h → ▁h
+    try bpe.addMerge("l", "l", 1);             // l + l → ll
+    try bpe.addMerge("ll", "o", 2);            // ll + o → llo
+    try bpe.addMerge("\xe2\x96\x81h", "e", 3); // ▁h + e → ▁he
+    try bpe.addMerge("\xe2\x96\x81he", "llo", 4); // ▁he + llo → ▁hello
+
+    const tokens = try bpe.encode("hello");
+    defer allocator.free(tokens);
+
+    // Should have BOS + ▁hello + EOS
+    try testing.expectEqual(@as(usize, 3), tokens.len);
+    try testing.expectEqual(SpecialTokens.BOS, tokens[0]);
+    try testing.expectEqual(@as(TokenId, 13), tokens[1]); // ▁hello
+    try testing.expectEqual(SpecialTokens.EOS, tokens[2]);
+
+    // Decode back
+    const decoded = try bpe.decode(tokens);
+    defer allocator.free(decoded);
+
+    try testing.expectEqualStrings("hello", decoded);
+}
+
+test "BPE tokenizer BOS/EOS handling" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var bpe = try BPETokenizer.init(allocator, 100);
+    defer bpe.deinit();
+
+    // Empty text should still have BOS + EOS
+    const tokens = try bpe.encode("");
+    defer allocator.free(tokens);
+
+    try testing.expectEqual(@as(usize, 2), tokens.len);
+    try testing.expectEqual(SpecialTokens.BOS, tokens[0]);
+    try testing.expectEqual(SpecialTokens.EOS, tokens[1]);
+}
+
+test "BPE tokenizer unknown token fallback" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var bpe = try BPETokenizer.init(allocator, 100);
+    defer bpe.deinit();
+
+    // No vocabulary or merges added — everything should be UNK
+    const tokens = try bpe.encode("hi");
+    defer allocator.free(tokens);
+
+    // BOS + UNK tokens + EOS
+    try testing.expectEqual(SpecialTokens.BOS, tokens[0]);
+    try testing.expectEqual(SpecialTokens.EOS, tokens[tokens.len - 1]);
+
+    // All non-BOS/EOS tokens should be UNK (since no vocab entries)
+    for (tokens[1 .. tokens.len - 1]) |tok| {
+        try testing.expectEqual(SpecialTokens.UNK, tok);
+    }
+}
+
+test "BPE tokenizer space handling" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var bpe = try BPETokenizer.init(allocator, 100);
+    defer bpe.deinit();
+
+    // Individual characters
+    try bpe.vocabulary.addToken("\xe2\x96\x81", -10.0, 4, false); // ▁
+    try bpe.vocabulary.addToken("a", -10.0, 5, false);
+    try bpe.vocabulary.addToken("b", -10.0, 6, false);
+
+    // Merged tokens
+    try bpe.vocabulary.addToken("\xe2\x96\x81a", -1.0, 7, false);
+    try bpe.vocabulary.addToken("\xe2\x96\x81b", -1.0, 8, false);
+
+    // Merges: ▁ + a → ▁a, ▁ + b → ▁b
+    try bpe.addMerge("\xe2\x96\x81", "a", 0);
+    try bpe.addMerge("\xe2\x96\x81", "b", 1);
+
+    const tokens = try bpe.encode("a b");
+    defer allocator.free(tokens);
+
+    // Should have BOS + ▁a + ▁b + EOS
+    try testing.expectEqual(@as(usize, 4), tokens.len);
+    try testing.expectEqual(SpecialTokens.BOS, tokens[0]);
+    try testing.expectEqual(@as(TokenId, 7), tokens[1]); // ▁a
+    try testing.expectEqual(@as(TokenId, 8), tokens[2]); // ▁b
+    try testing.expectEqual(SpecialTokens.EOS, tokens[3]);
+
+    // Decode should restore "a b"
+    const decoded = try bpe.decode(tokens);
+    defer allocator.free(decoded);
+
+    try testing.expectEqualStrings("a b", decoded);
+}
+
+test "BPE tokenizer loadFromGGUF" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var bpe = try BPETokenizer.init(allocator, 100);
+    defer bpe.deinit();
+
+    const pieces = [_][]const u8{ "<unk>", "<s>", "</s>", "<pad>", "he", "ll", "o" };
+    const scores = [_]f32{ 0, 0, 0, 0, -1.0, -1.5, -2.0 };
+    const merges = [_][]const u8{"h e"};
+
+    try bpe.loadFromGGUF(&pieces, &scores, &merges);
+
+    // Check vocabulary loaded
+    try testing.expect(bpe.vocabulary.getTokenId("he") != null);
+    try testing.expect(bpe.vocabulary.getTokenId("ll") != null);
+    try testing.expect(bpe.vocabulary.getTokenId("o") != null);
+
+    // Check merge loaded
+    try testing.expectEqual(@as(usize, 1), bpe.merges.items.len);
 }

@@ -146,7 +146,16 @@ fn matmulSIMD_f32_simple(a: Tensor(f32), b: Tensor(f32), result: *Tensor(f32)) !
     const simd_width = simd_config.f32_width;
     const VectorType = @Vector(simd_width, f32);
 
+    // Direct data pointers for real SIMD performance — avoids per-element
+    // bounds-checked get()/set() which would negate vectorization benefits.
+    const a_data = a.data;
+    const b_data = b.data;
+    const r_data = result.data;
+
     for (0..m) |i| {
+        const a_row = i * k; // a[i, 0] offset
+        const r_row = i * n; // result[i, 0] offset
+
         // Process columns in SIMD-width chunks
         var j: usize = 0;
         while (j + simd_width <= n) : (j += simd_width) {
@@ -154,31 +163,27 @@ fn matmulSIMD_f32_simple(a: Tensor(f32), b: Tensor(f32), result: *Tensor(f32)) !
 
             // Inner product with vectorization
             for (0..k) |l| {
-                const a_val: VectorType = @splat(try a.get(&[_]usize{i, l}));
+                const a_val: VectorType = @splat(a_data[a_row + l]);
 
-                // Load vector from B
-                var b_vec: VectorType = undefined;
-                for (0..simd_width) |v| {
-                    b_vec[v] = try b.get(&[_]usize{l, j + v});
-                }
+                // Load contiguous vector from B row l, columns j..j+simd_width
+                const b_off = l * n + j;
+                const b_vec: VectorType = b_data[b_off..][0..simd_width].*;
 
                 // Fused multiply-add
                 acc += a_val * b_vec;
             }
 
             // Store result vector
-            for (0..simd_width) |v| {
-                try result.set(&[_]usize{i, j + v}, acc[v]);
-            }
+            r_data[r_row + j ..][0..simd_width].* = @as([simd_width]f32, acc);
         }
 
         // Handle remaining columns (scalar)
         while (j < n) : (j += 1) {
             var sum: f32 = 0.0;
             for (0..k) |l| {
-                sum += (try a.get(&[_]usize{i, l})) * (try b.get(&[_]usize{l, j}));
+                sum += a_data[a_row + l] * b_data[l * n + j];
             }
-            try result.set(&[_]usize{i, j}, sum);
+            r_data[r_row + j] = sum;
         }
     }
 }
@@ -251,51 +256,50 @@ fn matmulBlockSIMD(a: Tensor(f32), b: Tensor(f32), result: *Tensor(f32),
     const simd_width = simd_config.f32_width;
     const VectorType = @Vector(simd_width, f32);
 
+    // Direct data pointers — eliminates per-element bounds checking in the hot loop
+    const a_data = a.data;
+    const b_data = b.data;
+    const r_data = result.data;
+    const a_cols = a.shape[1]; // k dimension (stride for a rows)
+    const b_cols = b.shape[1]; // n dimension (stride for b and result rows)
+
     for (0..block_m) |i| {
         const global_i = start_i + i;
+        const a_row = global_i * a_cols;
+        const r_row = global_i * b_cols;
 
         var j: usize = 0;
         while (j + simd_width <= block_n) : (j += simd_width) {
             const global_j = start_j + j;
 
-            // Load current result values
-            var acc: VectorType = undefined;
-            for (0..simd_width) |v| {
-                acc[v] = try result.get(&[_]usize{global_i, global_j + v});
-            }
+            // Load current result values as a SIMD vector
+            var acc: VectorType = r_data[r_row + global_j ..][0..simd_width].*;
 
             // Inner product with vectorization
             for (0..block_k) |l| {
                 const global_k = start_k + l;
-                const a_val: VectorType = @splat(try a.get(&[_]usize{global_i, global_k}));
-
-                var b_vec: VectorType = undefined;
-                for (0..simd_width) |v| {
-                    b_vec[v] = try b.get(&[_]usize{global_k, global_j + v});
-                }
+                const a_val: VectorType = @splat(a_data[a_row + global_k]);
+                const b_vec: VectorType = b_data[global_k * b_cols + global_j ..][0..simd_width].*;
 
                 // Fused multiply-add: acc = acc + a_val * b_vec
                 acc += a_val * b_vec;
             }
 
             // Store accumulated result
-            for (0..simd_width) |v| {
-                try result.set(&[_]usize{global_i, global_j + v}, acc[v]);
-            }
+            r_data[r_row + global_j ..][0..simd_width].* = @as([simd_width]f32, acc);
         }
 
         // Handle remaining columns with scalar code
         while (j < block_n) : (j += 1) {
             const global_j = start_j + j;
-            var acc = try result.get(&[_]usize{global_i, global_j});
+            var acc = r_data[r_row + global_j];
 
             for (0..block_k) |l| {
                 const global_k = start_k + l;
-                acc += (try a.get(&[_]usize{global_i, global_k})) *
-                       (try b.get(&[_]usize{global_k, global_j}));
+                acc += a_data[a_row + global_k] * b_data[global_k * b_cols + global_j];
             }
 
-            try result.set(&[_]usize{global_i, global_j}, acc);
+            r_data[r_row + global_j] = acc;
         }
     }
 }

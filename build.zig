@@ -4,23 +4,42 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Use individual test steps that work
+    // Main test step: run all tests via src/main.zig
     const test_step = b.step("test", "Run all tests");
 
-    // Individual test step for foundation
+    const main_tests = b.addTest(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_main_tests = b.addRunArtifact(main_tests);
+    test_step.dependOn(&run_main_tests.step);
+
+    // Foundation layer tests
     const test_foundation_step = b.step("test-foundation", "Test foundation layer");
 
-    // Individual test step for linear algebra
+    const foundation_tests = b.addTest(.{
+        .root_source_file = b.path("src/foundation/tensor.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_foundation_tests = b.addRunArtifact(foundation_tests);
+    test_foundation_step.dependOn(&run_foundation_tests.step);
+
+    // Linear algebra layer tests
     const test_linear_algebra_step = b.step("test-linear-algebra", "Test linear algebra layer");
 
-    // Demo step (run directly with zig)
-    const demo_step = b.step("demo", "Run educational demo (use: zig run examples/educational_demo.zig)");
+    const linear_algebra_tests = b.addTest(.{
+        .root_source_file = b.path("src/linear_algebra/matrix_ops.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
-    // Placeholder for other commands
-    _ = b.step("bench", "Run performance benchmarks");
+    const run_linear_algebra_tests = b.addRunArtifact(linear_algebra_tests);
+    test_linear_algebra_step.dependOn(&run_linear_algebra_tests.step);
 
-    // Note unused variables to avoid warnings
-    _ = test_step;
-    _ = test_foundation_step;
-    _ = test_linear_algebra_step;
+    // Benchmark step
+    _ = b.step("bench", "Run performance benchmarks (use: zig run examples/benchmark_demo.zig)");
 }

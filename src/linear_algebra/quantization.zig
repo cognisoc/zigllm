@@ -172,7 +172,7 @@ fn quantizeQ4_0(tensor: Tensor(f32), allocator: Allocator) !QuantizedTensor(.Q4_
     const block_size = 32;
     const num_blocks = (tensor.size + block_size - 1) / block_size;
 
-    // Each block: 2 bytes (scale) + 16 bytes (32 weights, 2 per byte)
+    // Each block: 2 bytes (f16 scale) + 16 bytes (32 weights packed as nibbles)
     const bytes_per_block = 2 + 16;
     const data_size = num_blocks * bytes_per_block;
 
@@ -185,24 +185,21 @@ fn quantizeQ4_0(tensor: Tensor(f32), allocator: Allocator) !QuantizedTensor(.Q4_
     const params = try allocator.alloc(QuantParams, num_blocks);
     errdefer allocator.free(params);
 
-    // Process each block
+    // Process each block using symmetric quantization (matching llama.cpp Q4_0)
     for (0..num_blocks) |block_idx| {
         const start_elem = block_idx * block_size;
         const end_elem = @min(start_elem + block_size, tensor.size);
         const actual_block_size = end_elem - start_elem;
 
-        // Find range in this block
-        var min_val: f32 = std.math.inf(f32);
-        var max_val: f32 = -std.math.inf(f32);
-
+        // Find absolute maximum in this block (symmetric quantization)
+        var amax: f32 = 0.0;
         for (start_elem..end_elem) |i| {
-            const val = tensor.data[i];
-            min_val = @min(min_val, val);
-            max_val = @max(max_val, val);
+            amax = @max(amax, @abs(tensor.data[i]));
         }
 
-        // Calculate scale (4-bit signed: -8 to 7)
-        const scale = (max_val - min_val) / 15.0;
+        // Scale maps [-amax, amax] to [-8, 7] range
+        // Q4_0 signed nibble range is -8..7, so we use 7.0 for positive side
+        const scale: f32 = if (amax == 0.0) 0.0 else amax / 7.0;
         const scale_f16: f16 = @floatCast(scale);
 
         params[block_idx] = QuantParams{ .Q4_0 = .{ .scale = scale_f16 } };
@@ -217,18 +214,17 @@ fn quantizeQ4_0(tensor: Tensor(f32), allocator: Allocator) !QuantizedTensor(.Q4_
             const elem1_idx = start_elem + pair_idx * 2;
             const elem2_idx = @min(elem1_idx + 1, end_elem - 1);
 
-            // Quantize to 4-bit signed (-8 to 7)
             const val1 = tensor.data[elem1_idx];
             const val2 = tensor.data[elem2_idx];
 
-            const q1 = std.math.clamp(@as(i8, @intFromFloat((val1 - min_val) / scale - 8)), -8, 7);
-            const q2 = std.math.clamp(@as(i8, @intFromFloat((val2 - min_val) / scale - 8)), -8, 7);
+            // Symmetric quantize: q = clamp(round(val / scale), -8, 7)
+            const q1: i8 = if (scale == 0.0) 0 else std.math.clamp(@as(i8, @intFromFloat(@round(val1 / scale))), -8, 7);
+            const q2: i8 = if (scale == 0.0) 0 else std.math.clamp(@as(i8, @intFromFloat(@round(val2 / scale))), -8, 7);
 
-            // Pack two 4-bit values into one byte
-            const packed_byte = @as(u8, @bitCast(@as(i8, q1 & 0xF))) |
-                               (@as(u8, @bitCast(@as(i8, q2 & 0xF))) << 4);
-
-            data[block_start + 2 + pair_idx] = packed_byte;
+            // Pack: store as unsigned nibble (q + 8) maps -8..7 to 0..15
+            const nib1: u8 = @intCast(@as(i16, q1) + 8);
+            const nib2: u8 = @intCast(@as(i16, q2) + 8);
+            data[block_start + 2 + pair_idx] = (nib1 & 0xF) | ((nib2 & 0xF) << 4);
         }
     }
 
@@ -388,7 +384,7 @@ fn dequantizeQ4_0(quantized: QuantizedTensor(.Q4_0), result: *Tensor(f32)) !void
     const bytes_per_block = 2 + 16;
 
     for (0..quantized.params.len) |block_idx| {
-        const scale = quantized.params[block_idx].Q4_0.scale;
+        const scale: f32 = @floatCast(quantized.params[block_idx].Q4_0.scale);
         const block_start = block_idx * bytes_per_block;
         const elem_start = block_idx * block_size;
         const elem_end = @min(elem_start + block_size, quantized.size);
@@ -397,13 +393,13 @@ fn dequantizeQ4_0(quantized: QuantizedTensor(.Q4_0), result: *Tensor(f32)) !void
         for (0..(elem_end - elem_start) / 2) |pair_idx| {
             const packed_byte = quantized.data[block_start + 2 + pair_idx];
 
-            // Unpack two 4-bit values
-            const q1 = @as(i8, @bitCast(packed_byte & 0xF));
-            const q2 = @as(i8, @bitCast((packed_byte >> 4) & 0xF));
+            // Unpack: nibble value is unsigned 0..15, subtract 8 to get signed -8..7
+            const nib1 = @as(i16, packed_byte & 0xF) - 8;
+            const nib2 = @as(i16, (packed_byte >> 4) & 0xF) - 8;
 
-            // Dequantize
-            const val1 = (@as(f32, @floatFromInt(q1)) + 8.0) * scale;
-            const val2 = (@as(f32, @floatFromInt(q2)) + 8.0) * scale;
+            // Dequantize: val = q * scale
+            const val1 = @as(f32, @floatFromInt(nib1)) * scale;
+            const val2 = @as(f32, @floatFromInt(nib2)) * scale;
 
             result.data[elem_start + pair_idx * 2] = val1;
             if (elem_start + pair_idx * 2 + 1 < elem_end) {

@@ -147,6 +147,28 @@ pub const GGUFArray = struct {
     pub fn deinit(self: GGUFArray, allocator: Allocator) void {
         allocator.free(self.data);
     }
+
+    /// Read strings from a string array.
+    /// Returns an owned slice of string slices (views into self.data).
+    /// Caller must free the returned slice (but not the individual strings).
+    pub fn readStringArray(self: GGUFArray, allocator: Allocator) ![][]const u8 {
+        if (self.element_type != .STRING) return error.NotStringArray;
+        const count: usize = @intCast(self.length);
+        const result = try allocator.alloc([]const u8, count);
+        errdefer allocator.free(result);
+
+        var offset: usize = 0;
+        for (0..count) |i| {
+            if (offset + 8 > self.data.len) return error.InvalidArrayData;
+            const str_len = std.mem.readInt(u64, self.data[offset..][0..8], .little);
+            offset += 8;
+            const slen: usize = @intCast(str_len);
+            if (offset + slen > self.data.len) return error.InvalidArrayData;
+            result[i] = self.data[offset .. offset + slen];
+            offset += slen;
+        }
+        return result;
+    }
 };
 
 /// Tensor information from GGUF
@@ -308,8 +330,8 @@ pub const GGUFReader = struct {
         // Extract alignment if present
         if (self.metadata.get("general.alignment")) |alignment_value| {
             switch (alignment_value) {
-                .UINT32 => |align| self.alignment = align,
-                .UINT64 => |align| self.alignment = align,
+                .UINT32 => |val| self.alignment = val,
+                .UINT64 => |val| self.alignment = val,
                 else => {},
             }
         }
@@ -363,7 +385,7 @@ pub const GGUFReader = struct {
             return error.StringTooLong;
         }
 
-        var string = try self.allocator.alloc(u8, length);
+        const string = try self.allocator.alloc(u8, length);
         errdefer self.allocator.free(string);
 
         _ = try reader.readAll(string);
@@ -389,16 +411,39 @@ pub const GGUFReader = struct {
                 const element_type = @as(GGUFType, @enumFromInt(try reader.readIntLittle(u32)));
                 const length = try reader.readIntLittle(u64);
 
-                // Calculate array data size
+                if (element_type == .STRING) {
+                    // For string arrays, read each length-prefixed string and
+                    // store them concatenated with u64 length prefixes
+                    var string_data = ArrayList(u8).init(self.allocator);
+                    errdefer string_data.deinit();
+
+                    for (0..@as(usize, @intCast(length))) |_| {
+                        const str_len = try reader.readIntLittle(u64);
+                        // Write length prefix
+                        const len_bytes = std.mem.asBytes(&str_len);
+                        try string_data.appendSlice(len_bytes);
+                        // Read and store string data
+                        const old_len = string_data.items.len;
+                        try string_data.resize(old_len + @as(usize, @intCast(str_len)));
+                        _ = try reader.readAll(string_data.items[old_len..]);
+                    }
+
+                    return GGUFValue{ .ARRAY = GGUFArray{
+                        .element_type = element_type,
+                        .length = length,
+                        .data = try string_data.toOwnedSlice(),
+                    } };
+                }
+
+                // Scalar array types
                 var data_size: u64 = 0;
                 if (element_type.scalarSize()) |scalar_size| {
                     data_size = length * scalar_size;
-                } else if (element_type == .STRING) {
-                    // For string arrays, we need to read each string
-                    return error.StringArraysNotSupported; // Simplified for now
+                } else {
+                    return error.UnsupportedArrayType;
                 }
 
-                var data = try self.allocator.alloc(u8, data_size);
+                const data = try self.allocator.alloc(u8, @intCast(data_size));
                 _ = try reader.readAll(data);
 
                 return GGUFValue{ .ARRAY = GGUFArray{
@@ -457,11 +502,72 @@ pub const GGUFReader = struct {
                 @memcpy(@as([*]u8, @ptrCast(tensor.data.ptr))[0..data_size], tensor_data);
             },
             .F16 => {
-                // TODO: Implement F16 to F32 conversion
-                return error.F16ConversionNotImplemented;
+                if (T != f32) return error.TypeMismatch;
+                const num_elements = tensor_info.elementCount();
+                for (0..@as(usize, @intCast(num_elements))) |i| {
+                    const f16_bits = std.mem.readInt(u16, tensor_data[i * 2 ..][0..2], .little);
+                    const f16_val: f16 = @bitCast(f16_bits);
+                    tensor.data[i] = @as(f32, @floatCast(f16_val));
+                }
+            },
+            .Q4_0 => {
+                if (T != f32) return error.TypeMismatch;
+                // Q4_0: block = 2 bytes (f16 scale) + 16 bytes (32 packed 4-bit values)
+                const q4_block_size: usize = 32;
+                const q4_bytes_per_block: usize = 2 + 16;
+                const num_elements: usize = @intCast(tensor_info.elementCount());
+                const num_blocks = (num_elements + q4_block_size - 1) / q4_block_size;
+
+                for (0..num_blocks) |block_idx| {
+                    const block_start = block_idx * q4_bytes_per_block;
+                    const elem_start = block_idx * q4_block_size;
+                    const elem_end = @min(elem_start + q4_block_size, num_elements);
+
+                    // Read f16 scale
+                    const scale_bits = std.mem.readInt(u16, tensor_data[block_start..][0..2], .little);
+                    const scale_f16: f16 = @bitCast(scale_bits);
+                    const scale: f32 = @floatCast(scale_f16);
+
+                    // Dequantize nibble pairs
+                    for (0..(elem_end - elem_start) / 2) |pair_idx| {
+                        const byte = tensor_data[block_start + 2 + pair_idx];
+                        const nib1 = @as(i16, byte & 0xF) - 8;
+                        const nib2 = @as(i16, (byte >> 4) & 0xF) - 8;
+
+                        tensor.data[elem_start + pair_idx * 2] = @as(f32, @floatFromInt(nib1)) * scale;
+                        if (elem_start + pair_idx * 2 + 1 < elem_end) {
+                            tensor.data[elem_start + pair_idx * 2 + 1] = @as(f32, @floatFromInt(nib2)) * scale;
+                        }
+                    }
+                }
+            },
+            .Q8_0 => {
+                if (T != f32) return error.TypeMismatch;
+                // Q8_0: block = 2 bytes (f16 scale) + 32 bytes (32 i8 values)
+                const q8_block_size: usize = 32;
+                const q8_bytes_per_block: usize = 2 + 32;
+                const num_elements: usize = @intCast(tensor_info.elementCount());
+                const num_blocks = (num_elements + q8_block_size - 1) / q8_block_size;
+
+                for (0..num_blocks) |block_idx| {
+                    const block_start = block_idx * q8_bytes_per_block;
+                    const elem_start = block_idx * q8_block_size;
+                    const elem_end = @min(elem_start + q8_block_size, num_elements);
+
+                    // Read f16 scale
+                    const scale_bits = std.mem.readInt(u16, tensor_data[block_start..][0..2], .little);
+                    const scale_f16: f16 = @bitCast(scale_bits);
+                    const scale: f32 = @floatCast(scale_f16);
+
+                    // Dequantize i8 values
+                    for (elem_start..elem_end) |i| {
+                        const elem_in_block = i - elem_start;
+                        const quantized_val = @as(i8, @bitCast(tensor_data[block_start + 2 + elem_in_block]));
+                        tensor.data[i] = @as(f32, @floatFromInt(quantized_val)) * scale;
+                    }
+                }
             },
             else => {
-                // TODO: Implement quantization dequantization
                 return error.QuantizedFormatsNotImplemented;
             },
         }
@@ -595,4 +701,133 @@ test "GGUF value types" {
     try testing.expectEqual(@as(usize, 8), GGUFType.FLOAT64.scalarSize().?);
     try testing.expect(GGUFType.STRING.scalarSize() == null);
     try testing.expect(GGUFType.ARRAY.scalarSize() == null);
+}
+
+test "F16 to F32 dequantization" {
+    const testing = std.testing;
+
+    // Test that F16→F32 conversion works with known values
+    // F16 encoding of 1.0: sign=0, exp=15, mant=0 → 0x3C00
+    // F16 encoding of -0.5: sign=1, exp=14, mant=0 → 0xB800
+    const f16_one: f16 = 1.0;
+    const f16_neg_half: f16 = -0.5;
+
+    const f32_one: f32 = @floatCast(f16_one);
+    const f32_neg_half: f32 = @floatCast(f16_neg_half);
+
+    try testing.expectApproxEqAbs(@as(f32, 1.0), f32_one, 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), f32_neg_half, 1e-6);
+
+    // Verify bit pattern conversion
+    const bits: u16 = @bitCast(f16_one);
+    try testing.expectEqual(@as(u16, 0x3C00), bits);
+}
+
+test "Q4_0 dequantization with known values" {
+    const testing = std.testing;
+
+    // Build a Q4_0 block manually: 32 elements with scale = 0.5 (as f16)
+    // Nibble value 8 (unsigned) = 0 (signed, 8-8=0) → dequant = 0 * 0.5 = 0
+    // Nibble value 15 (unsigned) = 7 (signed, 15-8=7) → dequant = 7 * 0.5 = 3.5
+    // Nibble value 0 (unsigned) = -8 (signed, 0-8=-8) → dequant = -8 * 0.5 = -4.0
+
+    const scale: f16 = 0.5;
+    const scale_bytes = std.mem.asBytes(&scale);
+
+    // Create block: 2 bytes scale + 16 bytes nibble pairs
+    var block: [18]u8 = undefined;
+    block[0] = scale_bytes[0];
+    block[1] = scale_bytes[1];
+
+    // Pack: first nibble = 8 (zero), second nibble = 15 (+7)
+    block[2] = 8 | (15 << 4); // elem[0] = 0.0, elem[1] = 3.5
+
+    // Pack: first nibble = 0 (-8), second nibble = 4 (-4)
+    block[3] = 0 | (4 << 4); // elem[2] = -4.0, elem[3] = -2.0
+
+    // Fill rest with neutral (8 = zero)
+    for (4..18) |i| {
+        block[i] = 8 | (8 << 4);
+    }
+
+    // Dequantize manually
+    const nib1_0 = @as(i16, block[2] & 0xF) - 8;
+    const nib2_0 = @as(i16, (block[2] >> 4) & 0xF) - 8;
+    const val1 = @as(f32, @floatFromInt(nib1_0)) * @as(f32, @floatCast(scale));
+    const val2 = @as(f32, @floatFromInt(nib2_0)) * @as(f32, @floatCast(scale));
+
+    try testing.expectApproxEqAbs(@as(f32, 0.0), val1, 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 3.5), val2, 1e-6);
+
+    const nib1_1 = @as(i16, block[3] & 0xF) - 8;
+    const nib2_1 = @as(i16, (block[3] >> 4) & 0xF) - 8;
+    const val3 = @as(f32, @floatFromInt(nib1_1)) * @as(f32, @floatCast(scale));
+    const val4 = @as(f32, @floatFromInt(nib2_1)) * @as(f32, @floatCast(scale));
+
+    try testing.expectApproxEqAbs(@as(f32, -4.0), val3, 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, -2.0), val4, 1e-6);
+}
+
+test "Q8_0 dequantization with known values" {
+    const testing = std.testing;
+
+    // Build a Q8_0 block: 2 bytes f16 scale + 32 i8 values
+    const scale: f16 = 0.1;
+    const scale_bytes = std.mem.asBytes(&scale);
+
+    var block: [34]u8 = undefined;
+    block[0] = scale_bytes[0];
+    block[1] = scale_bytes[1];
+
+    // Set first few i8 values
+    block[2] = @bitCast(@as(i8, 10)); // 10 * 0.1 = 1.0
+    block[3] = @bitCast(@as(i8, -10)); // -10 * 0.1 = -1.0
+    block[4] = @bitCast(@as(i8, 0)); // 0 * 0.1 = 0.0
+
+    // Fill rest with zeros
+    for (5..34) |i| {
+        block[i] = 0;
+    }
+
+    // Verify dequantization math
+    const scale_f32: f32 = @floatCast(scale);
+    const val1 = @as(f32, @floatFromInt(@as(i8, @bitCast(block[2])))) * scale_f32;
+    const val2 = @as(f32, @floatFromInt(@as(i8, @bitCast(block[3])))) * scale_f32;
+    const val3 = @as(f32, @floatFromInt(@as(i8, @bitCast(block[4])))) * scale_f32;
+
+    try testing.expectApproxEqAbs(@as(f32, 1.0), val1, 0.01);
+    try testing.expectApproxEqAbs(@as(f32, -1.0), val2, 0.01);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), val3, 0.01);
+}
+
+test "GGUF string array reading" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Build a string array manually: two strings "hello" and "world"
+    var data = ArrayList(u8).init(allocator);
+    defer data.deinit();
+
+    // String 1: "hello" (length=5)
+    const len1: u64 = 5;
+    try data.appendSlice(std.mem.asBytes(&len1));
+    try data.appendSlice("hello");
+
+    // String 2: "world" (length=5)
+    const len2: u64 = 5;
+    try data.appendSlice(std.mem.asBytes(&len2));
+    try data.appendSlice("world");
+
+    const arr = GGUFArray{
+        .element_type = .STRING,
+        .length = 2,
+        .data = data.items,
+    };
+
+    const strings = try arr.readStringArray(allocator);
+    defer allocator.free(strings);
+
+    try testing.expectEqual(@as(usize, 2), strings.len);
+    try testing.expectEqualStrings("hello", strings[0]);
+    try testing.expectEqualStrings("world", strings[1]);
 }
