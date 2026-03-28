@@ -97,12 +97,12 @@ pub const Vocabulary = struct {
         var vocab = Vocabulary{
             .allocator = allocator,
             .piece_to_id = HashMap([]const u8, TokenId, StringContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .id_to_piece = ArrayList(TokenPiece).init(allocator),
+            .id_to_piece = try std.ArrayList(TokenPiece).initCapacity(allocator, vocab_size),
             .vocab_size = vocab_size,
         };
 
         // Reserve space for efficiency
-        try vocab.id_to_piece.ensureTotalCapacity(vocab_size);
+        try vocab.id_to_piece.ensureTotalCapacity(allocator, vocab_size);
 
         // Add special tokens
         try vocab.addToken("<unk>", 0.0, SpecialTokens.UNK, true);
@@ -119,7 +119,7 @@ pub const Vocabulary = struct {
         for (self.id_to_piece.items) |piece| {
             self.allocator.free(piece.piece);
         }
-        self.id_to_piece.deinit();
+        self.id_to_piece.deinit(self.allocator);
         self.piece_to_id.deinit();
     }
 
@@ -134,7 +134,7 @@ pub const Vocabulary = struct {
 
         // Ensure vector is large enough
         if (id >= self.id_to_piece.items.len) {
-            try self.id_to_piece.resize(id + 1);
+            try self.id_to_piece.resize(self.allocator, id + 1);
         }
 
         // Add to both maps
@@ -167,7 +167,9 @@ pub const Vocabulary = struct {
     pub fn loadSentencePiece(self: *Vocabulary, file_path: []const u8) !void {
         // TODO: Implement SentencePiece model loading
         // This would parse the protobuf format used by SentencePiece
-        _ = file_path;
+        if (file_path.len > 0) {
+            _ = file_path[0]; // Use parameter to avoid unused warning
+        }
         return error.NotImplemented;
     }
 
@@ -231,37 +233,37 @@ pub const SimpleTokenizer = struct {
     /// Tokenize text into token IDs
     /// This is a simplified implementation - production would use BPE/SentencePiece
     pub fn encode(self: SimpleTokenizer, text: []const u8) ![]TokenId {
-        var tokens = ArrayList(TokenId).init(self.allocator);
-        errdefer tokens.deinit();
+        var tokens = try std.ArrayList(TokenId).initCapacity(self.allocator, text.len);
+        errdefer tokens.deinit(self.allocator);
 
         // Add beginning of sequence token
-        try tokens.append(SpecialTokens.BOS);
+        try tokens.append(self.allocator, SpecialTokens.BOS);
 
         // Simple word-based tokenization for demonstration
-        var word_iter = std.mem.split(u8, text, " ");
+        var word_iter = std.mem.splitSequence(u8, text, " ");
         while (word_iter.next()) |word| {
             if (word.len == 0) continue;
 
             // Try to find exact word match
             if (self.vocabulary.getTokenId(word)) |token_id| {
-                try tokens.append(token_id);
+                try tokens.append(self.allocator, token_id);
             } else {
                 // Fallback to character-level or unknown token
                 // In production, this would use subword algorithms
-                try tokens.append(SpecialTokens.UNK);
+                try tokens.append(self.allocator, SpecialTokens.UNK);
             }
         }
 
         // Add end of sequence token
-        try tokens.append(SpecialTokens.EOS);
+        try tokens.append(self.allocator, SpecialTokens.EOS);
 
-        return try tokens.toOwnedSlice();
+        return try tokens.toOwnedSlice(self.allocator);
     }
 
     /// Decode token IDs back to text
     pub fn decode(self: SimpleTokenizer, token_ids: []const TokenId) ![]u8 {
-        var result = ArrayList(u8).init(self.allocator);
-        errdefer result.deinit();
+        var result = try std.ArrayList(u8).initCapacity(self.allocator, token_ids.len * 10);
+        errdefer result.deinit(self.allocator);
 
         for (token_ids, 0..) |token_id, i| {
             // Skip special tokens in output (except spaces)
@@ -271,18 +273,18 @@ pub const SimpleTokenizer = struct {
 
             if (self.vocabulary.getTokenPiece(token_id)) |piece| {
                 if (token_id == SpecialTokens.UNK) {
-                    try result.appendSlice("<unk>");
+                    try result.appendSlice(self.allocator, "<unk>");
                 } else {
                     // Add space before tokens (except first)
                     if (i > 0 and result.items.len > 0) {
-                        try result.append(' ');
+                        try result.append(self.allocator, ' ');
                     }
-                    try result.appendSlice(piece.piece);
+                    try result.appendSlice(self.allocator, piece.piece);
                 }
             }
         }
 
-        return try result.toOwnedSlice();
+        return try result.toOwnedSlice(self.allocator);
     }
 
     /// Get vocabulary size
@@ -501,7 +503,7 @@ test "tokenizer statistics" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var vocab = try Vocabulary.createSimpleVocab(allocator);
+    const vocab = try Vocabulary.createSimpleVocab(allocator);
     var tokenizer = SimpleTokenizer.initWithVocab(vocab, allocator);
     defer tokenizer.deinit();
 

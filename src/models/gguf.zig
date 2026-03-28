@@ -308,8 +308,8 @@ pub const GGUFReader = struct {
         // Extract alignment if present
         if (self.metadata.get("general.alignment")) |alignment_value| {
             switch (alignment_value) {
-                .UINT32 => |align| self.alignment = align,
-                .UINT64 => |align| self.alignment = align,
+                .UINT32 => |alignment| self.alignment = alignment,
+                .UINT64 => |alignment| self.alignment = alignment,
                 else => {},
             }
         }
@@ -363,7 +363,7 @@ pub const GGUFReader = struct {
             return error.StringTooLong;
         }
 
-        var string = try self.allocator.alloc(u8, length);
+        const string = try self.allocator.alloc(u8, length);
         errdefer self.allocator.free(string);
 
         _ = try reader.readAll(string);
@@ -398,7 +398,7 @@ pub const GGUFReader = struct {
                     return error.StringArraysNotSupported; // Simplified for now
                 }
 
-                var data = try self.allocator.alloc(u8, data_size);
+                const data = try self.allocator.alloc(u8, data_size);
                 _ = try reader.readAll(data);
 
                 return GGUFValue{ .ARRAY = GGUFArray{

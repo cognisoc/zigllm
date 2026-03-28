@@ -115,7 +115,7 @@ pub const TransformerBlock = struct {
                block_type: TransformerBlockType, norm_placement: NormPlacement, ffn_type: FFNType) !TransformerBlock {
 
         // Initialize attention layers
-        var self_attention = try MultiHeadAttention.init(allocator, d_model, num_heads);
+        const self_attention = try MultiHeadAttention.init(allocator, d_model, num_heads);
         var cross_attention: ?MultiHeadAttention = null;
 
         if (block_type == .EncoderDecoder) {
@@ -123,7 +123,7 @@ pub const TransformerBlock = struct {
         }
 
         // Initialize feed-forward network
-        var ffn = try FeedForward.init(allocator, d_model, d_ff, ffn_type);
+        const ffn = try FeedForward.init(allocator, d_model, d_ff, ffn_type);
 
         // Initialize normalization parameters
         var norm1 = try Tensor(f32).init(allocator, &[_]usize{d_model});
@@ -389,7 +389,7 @@ pub const Transformer = struct {
 
         // Pass through all transformer blocks
         for (0..self.num_layers) |layer_idx| {
-            var block_output = try self.blocks[layer_idx].forward(current_input, encoder_output, mask);
+            const block_output = try self.blocks[layer_idx].forward(current_input, encoder_output, mask);
 
             // Free intermediate results (except original input)
             if (should_free_current) {
@@ -401,7 +401,7 @@ pub const Transformer = struct {
         }
 
         // Final layer normalization
-        var final_output = try normalization.layerNorm(f32, current_input, self.final_norm, self.final_norm_bias, self.allocator);
+        const final_output = try normalization.layerNorm(f32, current_input, self.final_norm, self.final_norm_bias, self.allocator);
 
         // Clean up final intermediate
         if (should_free_current) {

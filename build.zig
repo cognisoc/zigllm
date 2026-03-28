@@ -4,23 +4,24 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Use individual test steps that work
-    const test_step = b.step("test", "Run all tests");
+    // Create a simple test step that runs the main file tests
+    const test_step = b.addTest(.{
+        .name = "test",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
 
-    // Individual test step for foundation
-    const test_foundation_step = b.step("test-foundation", "Test foundation layer");
+    // Add include paths for all source directories
+    test_step.addIncludePath(.{ .path = "src" });
+    test_step.addIncludePath(.{ .path = "src/foundation" });
+    test_step.addIncludePath(.{ .path = "src/linear_algebra" });
+    test_step.addIncludePath(.{ .path = "src/neural_primitives" });
+    test_step.addIncludePath(.{ .path = "src/transformers" });
+    test_step.addIncludePath(.{ .path = "src/models" });
+    test_step.addIncludePath(.{ .path = "src/inference" });
 
-    // Individual test step for linear algebra
-    const test_linear_algebra_step = b.step("test-linear-algebra", "Test linear algebra layer");
-
-    // Demo step (run directly with zig)
-    const demo_step = b.step("demo", "Run educational demo (use: zig run examples/educational_demo.zig)");
-
-    // Placeholder for other commands
-    _ = b.step("bench", "Run performance benchmarks");
-
-    // Note unused variables to avoid warnings
-    _ = test_step;
-    _ = test_foundation_step;
-    _ = test_linear_algebra_step;
+    // Set default step to run tests
+    const default_step = b.step("default", "Build and test the project");
+    default_step.dependOn(&test_step.step);
 }

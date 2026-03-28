@@ -290,7 +290,8 @@ pub const SlidingWindowKVCache = struct {
         current_entry.sequence_length = @intCast(keep_length);
     }
 
-    pub fn getWithWindow(self: *SlidingWindowKVCache, sequence_id: u64, layer_id: u32, query_pos: u32) !?struct { keys: Tensor, values: Tensor } {
+    pub fn getWithWindow(self: *SlidingWindowKVCache, sequence_id: u64, layer_id: u32, _query_pos: u32) !?struct { keys: Tensor, values: Tensor } {
+        _ = _query_pos;
         const current_length = self.cache.getSequenceLength(sequence_id);
         if (current_length == 0) {
             return null;

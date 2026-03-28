@@ -160,9 +160,9 @@ const TokenBuffer = struct {
     /// Allocator for memory management
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator) TokenBuffer {
+    pub fn init(allocator: Allocator) !TokenBuffer {
         return TokenBuffer{
-            .chunks = ArrayList(TokenChunk).init(allocator),
+            .chunks = try std.ArrayList(TokenChunk).initCapacity(allocator, 100),
             .mutex = Mutex{},
             .condition = Condition{},
             .closed = false,
@@ -180,7 +180,7 @@ const TokenBuffer = struct {
                 self.allocator.free(text);
             }
         }
-        self.chunks.deinit();
+        self.chunks.deinit(self.allocator);
     }
 
     pub fn push(self: *TokenBuffer, chunk: TokenChunk) !void {
@@ -191,7 +191,7 @@ const TokenBuffer = struct {
             return error.BufferClosed;
         }
 
-        try self.chunks.append(chunk);
+        try self.chunks.append(self.allocator, chunk);
         self.condition.signal();
     }
 
@@ -545,7 +545,7 @@ test "token buffer thread safety" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buffer = TokenBuffer.init(allocator);
+    var buffer = try TokenBuffer.init(allocator);
     defer buffer.deinit();
 
     try testing.expect(buffer.isEmpty());

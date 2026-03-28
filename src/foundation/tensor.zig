@@ -304,9 +304,9 @@ pub fn Tensor(comptime T: type) type {
         /// Understanding tensor contents is crucial for debugging neural networks.
         /// This function provides human-readable tensor representation.
         pub fn print(self: Self, writer: anytype) !void {
-            try writer.print("Tensor(shape=[");
+            try writer.print("Tensor(shape=[", .{});
             for (self.shape, 0..) |dim, i| {
-                if (i > 0) try writer.print(", ");
+                if (i > 0) try writer.print(", ", .{});
                 try writer.print("{}", .{dim});
             }
             try writer.print("], size={}, type={})\n", .{ self.size, T });
@@ -320,42 +320,42 @@ pub fn Tensor(comptime T: type) type {
         }
 
         fn print1D(self: Self, writer: anytype) !void {
-            try writer.print("[");
+            try writer.print("[", .{});
             for (0..self.shape[0]) |i| {
-                if (i > 0) try writer.print(", ");
+                if (i > 0) try writer.print(", ", .{});
                 const val = try self.get(&[_]usize{i});
                 try writer.print("{d:.3}", .{val});
             }
-            try writer.print("]\n");
+            try writer.print("]\n", .{});
         }
 
         fn print2D(self: Self, writer: anytype) !void {
-            try writer.print("[\n");
+            try writer.print("[\n", .{});
             for (0..self.shape[0]) |i| {
-                try writer.print("  [");
+                try writer.print("  [", .{});
                 for (0..self.shape[1]) |j| {
-                    if (j > 0) try writer.print(", ");
+                    if (j > 0) try writer.print(", ", .{});
                     const val = try self.get(&[_]usize{ i, j });
                     try writer.print("{d:.3}", .{val});
                 }
-                try writer.print("]");
-                if (i < self.shape[0] - 1) try writer.print(",");
-                try writer.print("\n");
+                try writer.print("]", .{});
+                if (i < self.shape[0] - 1) try writer.print(",", .{});
+                try writer.print("\n", .{});
             }
-            try writer.print("]\n");
+            try writer.print("]\n", .{});
         }
 
         fn printND(self: Self, writer: anytype) !void {
-            try writer.print("Data: [");
+            try writer.print("Data: [", .{});
             const max_display = @min(self.size, 20);
             for (0..max_display) |i| {
-                if (i > 0) try writer.print(", ");
+                if (i > 0) try writer.print(", ", .{});
                 try writer.print("{d:.3}", .{self.data[i]});
             }
             if (self.size > max_display) {
                 try writer.print("... ({} more)", .{self.size - max_display});
             }
-            try writer.print("]\n");
+            try writer.print("]\n", .{});
         }
     };
 }

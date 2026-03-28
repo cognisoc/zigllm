@@ -213,7 +213,7 @@ pub const LLaMAModel = struct {
     /// Initialize LLaMA model with given configuration
     pub fn init(allocator: Allocator, config: LLaMAConfig) !LLaMAModel {
         // Initialize token embeddings
-        var token_embeddings = try TokenEmbedding.init(allocator, config.vocab_size, config.d_model);
+        const token_embeddings = try TokenEmbedding.init(allocator, config.vocab_size, config.d_model);
 
         // Initialize transformer layers
         var transformer_layers = try allocator.alloc(LLaMATransformerLayer, config.num_layers);
@@ -279,7 +279,7 @@ pub const LLaMAModel = struct {
         var should_free = false;
 
         for (0..self.config.num_layers) |layer_idx| {
-            var layer_output = try self.transformer_layers[layer_idx].forward(current_hidden);
+            const layer_output = try self.transformer_layers[layer_idx].forward(current_hidden);
 
             // Free previous layer output (except original embeddings)
             if (should_free) {
@@ -350,7 +350,7 @@ pub const LLaMAModel = struct {
         }
 
         // Return only the generated portion (excluding prompt)
-        var result = try allocator.alloc(u32, current_length - prompt_tokens.len);
+        const result = try allocator.alloc(u32, current_length - prompt_tokens.len);
         @memcpy(result, generated_tokens[prompt_tokens.len..current_length]);
 
         allocator.free(generated_tokens);
@@ -392,10 +392,10 @@ const LLaMATransformerLayer = struct {
         ffn_norm.fill(1.0);
 
         // Initialize attention (LLaMA uses standard multi-head attention with RoPE)
-        var attention = try MultiHeadAttention.init(allocator, config.d_model, config.num_heads);
+        const attention = try MultiHeadAttention.init(allocator, config.d_model, config.num_heads);
 
         // Initialize SwiGLU FFN
-        var ffn = try FeedForward.init(allocator, config.d_model, config.d_ff, FFNType.SwiGLU);
+        const ffn = try FeedForward.init(allocator, config.d_model, config.d_ff, FFNType.SwiGLU);
 
         return LLaMATransformerLayer{
             .config = config,
@@ -481,7 +481,7 @@ test "LLaMA model initialization" {
     const allocator = testing.allocator;
 
     // Create a small custom config for testing
-    var config = LLaMAConfig{
+    const config = LLaMAConfig{
         .d_model = 64,
         .num_layers = 2,
         .num_heads = 4,
@@ -505,7 +505,7 @@ test "LLaMA model initialization" {
 test "LLaMA forward pass shape consistency" {
     const allocator = testing.allocator;
 
-    var config = LLaMAConfig{
+    const config = LLaMAConfig{
         .d_model = 32,
         .num_layers = 1,
         .num_heads = 2,
@@ -534,7 +534,7 @@ test "LLaMA forward pass shape consistency" {
 test "LLaMA generation basic functionality" {
     const allocator = testing.allocator;
 
-    var config = LLaMAConfig{
+    const config = LLaMAConfig{
         .d_model = 16,
         .num_layers = 1,
         .num_heads = 2,
@@ -552,7 +552,7 @@ test "LLaMA generation basic functionality" {
     const prompt = [_]u32{1, 5}; // Simple prompt
     const max_new_tokens = 3;
 
-    var generated = try model.generate(&prompt, max_new_tokens, allocator);
+    const generated = try model.generate(&prompt, max_new_tokens, allocator);
     defer allocator.free(generated);
 
     // Should generate some tokens (may be less than max if EOS encountered)
@@ -567,7 +567,7 @@ test "LLaMA generation basic functionality" {
 test "LLaMA transformer layer residual connections" {
     const allocator = testing.allocator;
 
-    var config = LLaMAConfig{
+    const config = LLaMAConfig{
         .d_model = 8,
         .num_layers = 1,
         .num_heads = 2,
@@ -637,7 +637,7 @@ test "LLaMA memory management" {
     const allocator = testing.allocator;
 
     // Test that we can create and destroy models without leaks
-    var config = LLaMAConfig{
+    const config = LLaMAConfig{
         .d_model = 4,
         .num_layers = 1,
         .num_heads = 1,

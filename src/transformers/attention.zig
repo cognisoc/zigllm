@@ -222,10 +222,10 @@ pub const MultiHeadAttention = struct {
 pub fn scaledDotProductAttention(Q: Tensor(f32), K: Tensor(f32), V: Tensor(f32), mask: ?Tensor(f32), allocator: Allocator) !Tensor(f32) {
     if (Q.ndim() != 4 or K.ndim() != 4 or V.ndim() != 4) return TensorError.IncompatibleShapes;
 
-    const batch_size = Q.shape[0];
-    const num_heads = Q.shape[1];
-    const seq_len_q = Q.shape[2];
-    const seq_len_k = K.shape[2];
+    _ = Q.shape[0]; // batch_size
+    _ = Q.shape[1]; // num_heads
+    _ = Q.shape[2]; // seq_len_q
+    _ = K.shape[2]; // seq_len_k
     const d_k = Q.shape[3];
 
     // Step 1: Compute attention scores QK^T

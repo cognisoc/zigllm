@@ -124,8 +124,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const stderr = std.io.getStdErr();
-    const stdout = stderr.writer();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     try stdout.print("ZigLlama v{} - Educational LLaMA Implementation\n", .{version});
     try stdout.print("=============================================\n\n", .{});

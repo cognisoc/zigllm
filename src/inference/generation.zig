@@ -320,7 +320,7 @@ pub const TextGenerator = struct {
             const last_logits = logits.data[(logits.size - vocab_size)..logits.size];
 
             // Apply repetition penalty
-            var modified_logits = try self.allocator.alloc(f32, vocab_size);
+            const modified_logits = try self.allocator.alloc(f32, vocab_size);
             defer self.allocator.free(modified_logits);
             @memcpy(modified_logits, last_logits);
 

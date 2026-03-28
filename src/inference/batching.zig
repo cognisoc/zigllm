@@ -65,8 +65,8 @@ pub const BatchRequest = struct {
             .prompt = try allocator.dupe(u8, prompt),
             .config = config,
             .max_tokens = config.max_tokens,
-            .generated_tokens = ArrayList(TokenId).init(allocator),
-            .generated_text = ArrayList(u8).init(allocator),
+            .generated_tokens = try std.ArrayList(TokenId).initCapacity(allocator, 100),
+            .generated_text = try std.ArrayList(u8).initCapacity(allocator, 100),
             .cumulative_log_prob = 0.0,
             .created_at = std.time.milliTimestamp(),
             .started_at = null,
@@ -78,13 +78,13 @@ pub const BatchRequest = struct {
 
     pub fn deinit(self: *BatchRequest, allocator: Allocator) void {
         allocator.free(self.prompt);
-        self.generated_tokens.deinit();
-        self.generated_text.deinit();
+        self.generated_tokens.deinit(allocator);
+        self.generated_text.deinit(allocator);
     }
 
-    pub fn addToken(self: *BatchRequest, token_id: TokenId, text: []const u8, log_prob: f32) !void {
-        try self.generated_tokens.append(token_id);
-        try self.generated_text.appendSlice(text);
+    pub fn addToken(self: *BatchRequest, allocator: Allocator, token_id: TokenId, text: []const u8, log_prob: f32) !void {
+        try self.generated_tokens.append(allocator, token_id);
+        try self.generated_text.appendSlice(allocator, text);
         self.cumulative_log_prob += log_prob;
     }
 
@@ -641,7 +641,7 @@ test "batch request lifecycle" {
     try testing.expect(request.stop_reason == null);
 
     // Add a token
-    try request.addToken(42, "hello", -1.5);
+    try request.addToken(allocator, 42, "hello", -1.5);
     try testing.expectEqual(@as(usize, 1), request.generated_tokens.items.len);
     try testing.expectEqual(@as(TokenId, 42), request.generated_tokens.items[0]);
     try testing.expectEqualStrings("hello", request.generated_text.items);
