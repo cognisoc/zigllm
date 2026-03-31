@@ -265,6 +265,28 @@ pub fn Tensor(comptime T: type) type {
         /// For matrices A(m×n) and B(n×p), result C(m×p):
         /// C[i,j] = Σ(k=0 to n-1) A[i,k] × B[k,j]
         pub fn matmul(self: Self, other: Self, allocator: Allocator) TensorError!Self {
+            // 3D @ 2D batched matmul: [batch, m, n] @ [n, p] -> [batch, m, p]
+            if (self.ndim() == 3 and other.ndim() == 2) {
+                const batch = self.shape[0];
+                const m = self.shape[1];
+                const n = self.shape[2];
+                if (n != other.shape[0]) return TensorError.IncompatibleShapes;
+                const p = other.shape[1];
+                var result = try Self.init(allocator, &[_]usize{ batch, m, p });
+                for (0..batch) |b| {
+                    for (0..m) |i| {
+                        for (0..p) |j| {
+                            var sum: T = 0;
+                            for (0..n) |k| {
+                                sum += self.data[b * m * n + i * n + k] * other.data[k * p + j];
+                            }
+                            result.data[b * m * p + i * p + j] = sum;
+                        }
+                    }
+                }
+                return result;
+            }
+
             // Validate 2D matrices
             if (self.ndim() != 2 or other.ndim() != 2) {
                 return TensorError.IncompatibleShapes;
@@ -304,9 +326,9 @@ pub fn Tensor(comptime T: type) type {
         /// Understanding tensor contents is crucial for debugging neural networks.
         /// This function provides human-readable tensor representation.
         pub fn print(self: Self, writer: anytype) !void {
-            try writer.print("Tensor(shape=[", .{});
+            try writer.writeAll("Tensor(shape=[");
             for (self.shape, 0..) |dim, i| {
-                if (i > 0) try writer.print(", ", .{});
+                if (i > 0) try writer.writeAll(", ");
                 try writer.print("{}", .{dim});
             }
             try writer.print("], size={}, type={})\n", .{ self.size, T });
@@ -320,42 +342,42 @@ pub fn Tensor(comptime T: type) type {
         }
 
         fn print1D(self: Self, writer: anytype) !void {
-            try writer.print("[", .{});
+            try writer.writeAll("[");
             for (0..self.shape[0]) |i| {
-                if (i > 0) try writer.print(", ", .{});
+                if (i > 0) try writer.writeAll(", ");
                 const val = try self.get(&[_]usize{i});
                 try writer.print("{d:.3}", .{val});
             }
-            try writer.print("]\n", .{});
+            try writer.writeAll("]\n");
         }
 
         fn print2D(self: Self, writer: anytype) !void {
-            try writer.print("[\n", .{});
+            try writer.writeAll("[\n");
             for (0..self.shape[0]) |i| {
-                try writer.print("  [", .{});
+                try writer.writeAll("  [");
                 for (0..self.shape[1]) |j| {
-                    if (j > 0) try writer.print(", ", .{});
+                    if (j > 0) try writer.writeAll(", ");
                     const val = try self.get(&[_]usize{ i, j });
                     try writer.print("{d:.3}", .{val});
                 }
-                try writer.print("]", .{});
-                if (i < self.shape[0] - 1) try writer.print(",", .{});
-                try writer.print("\n", .{});
+                try writer.writeAll("]");
+                if (i < self.shape[0] - 1) try writer.writeAll(",");
+                try writer.writeAll("\n");
             }
-            try writer.print("]\n", .{});
+            try writer.writeAll("]\n");
         }
 
         fn printND(self: Self, writer: anytype) !void {
-            try writer.print("Data: [", .{});
+            try writer.writeAll("Data: [");
             const max_display = @min(self.size, 20);
             for (0..max_display) |i| {
-                if (i > 0) try writer.print(", ", .{});
+                if (i > 0) try writer.writeAll(", ");
                 try writer.print("{d:.3}", .{self.data[i]});
             }
             if (self.size > max_display) {
                 try writer.print("... ({} more)", .{self.size - max_display});
             }
-            try writer.print("]\n", .{});
+            try writer.writeAll("]\n");
         }
     };
 }

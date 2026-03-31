@@ -480,9 +480,8 @@ pub const BenchmarkRunner = struct {
         self: *BenchmarkRunner,
         generator: *TextGenerator,
         test_prompts: []const []const u8,
-        _gen_config: GenerationConfig
+        _: GenerationConfig,
     ) !BenchmarkResult {
-        _ = _gen_config;
         const start_time = std.time.milliTimestamp();
         var successful_runs: u32 = 0;
         var total_tokens: u32 = 0;

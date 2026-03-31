@@ -222,10 +222,6 @@ pub const MultiHeadAttention = struct {
 pub fn scaledDotProductAttention(Q: Tensor(f32), K: Tensor(f32), V: Tensor(f32), mask: ?Tensor(f32), allocator: Allocator) !Tensor(f32) {
     if (Q.ndim() != 4 or K.ndim() != 4 or V.ndim() != 4) return TensorError.IncompatibleShapes;
 
-    _ = Q.shape[0]; // batch_size
-    _ = Q.shape[1]; // num_heads
-    _ = Q.shape[2]; // seq_len_q
-    _ = K.shape[2]; // seq_len_k
     const d_k = Q.shape[3];
 
     // Step 1: Compute attention scores QK^T
@@ -420,8 +416,8 @@ fn batchedMatMul(a: Tensor(f32), b: Tensor(f32), allocator: Allocator, transpose
     const seq_len_a = a.shape[2];
     const d_a = a.shape[3];
 
-    const seq_len_b = if (transpose_b) b.shape[3] else b.shape[2];
-    const d_b = if (transpose_b) b.shape[2] else b.shape[3];
+    const seq_len_b = if (transpose_b) b.shape[2] else b.shape[3];
+    const d_b = if (transpose_b) b.shape[3] else b.shape[2];
 
     if (d_a != d_b) return TensorError.IncompatibleShapes;
 

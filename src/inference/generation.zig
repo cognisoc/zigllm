@@ -312,7 +312,7 @@ pub const TextGenerator = struct {
         while (num_generated < self.config.max_tokens) {
             // Forward pass through model
             const input_tokens = generated_tokens.items;
-            const logits = try self.model.forward(input_tokens, null);
+            var logits = try self.model.forward(input_tokens);
             defer logits.deinit();
 
             // Get logits for last position (next token prediction)

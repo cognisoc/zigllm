@@ -350,7 +350,7 @@ pub fn completeEmbedding(token_emb: Tensor(f32), pos_emb: Tensor(f32), seg_emb: 
     // Add segment embeddings if provided
     if (seg_emb) |segment_embeddings| {
         var temp = result;
-        result = try result.add(segment_embeddings, allocator);
+        result = try temp.add(segment_embeddings, allocator);
         temp.deinit(); // Clean up intermediate result
     }
 

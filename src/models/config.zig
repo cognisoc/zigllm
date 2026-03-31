@@ -313,8 +313,6 @@ pub const ModelConfig = struct {
 
     /// Calculate total parameter count
     pub fn parameterCount(self: ModelConfig) usize {
-        _ = self.headDim();
-
         // Embedding parameters
         const embedding_params = self.vocab_size * self.d_model;
 
