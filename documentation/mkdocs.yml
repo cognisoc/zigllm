@@ -1,0 +1,234 @@
+site_name: ZigLlama
+site_description: "Educational LLM Inference in Zig — From Tensors to Transformers"
+site_url: https://zigllama.github.io
+repo_url: https://github.com/dipankar/zigllama
+repo_name: dipankar/zigllama
+copyright: "Copyright 2024–2026 ZigLlama Contributors — MIT License"
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/brain
+
+plugins:
+  - search:
+      lang: en
+      separator: '[\s\-\.]+'
+  - tags:
+      tags_file: references/tags.md
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.critic
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/dipankar/zigllama
+
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Building from Source: getting-started/building.md
+    - Project Structure: getting-started/project-structure.md
+
+  - Architecture:
+    - architecture/index.md
+    - Design Principles: architecture/design-principles.md
+    - 6-Layer Overview: architecture/six-layer-overview.md
+    - Module Dependencies: architecture/module-dependencies.md
+    - Comparison with llama.cpp: architecture/llama-cpp-comparison.md
+
+  - "Layer 1: Foundations":
+    - foundations/index.md
+    - Tensor Operations: foundations/tensors.md
+    - Memory Management: foundations/memory-management.md
+    - Memory Mapping: foundations/memory-mapping.md
+    - GGUF Binary Format: foundations/gguf-format.md
+    - BLAS Integration: foundations/blas-integration.md
+    - CPU Threading & NUMA: foundations/threading.md
+
+  - "Layer 2: Linear Algebra":
+    - linear-algebra/index.md
+    - SIMD Matrix Operations: linear-algebra/matrix-operations.md
+    - Basic Quantization: linear-algebra/quantization-basics.md
+    - K-Quantization: linear-algebra/k-quantization.md
+    - Importance Quantization: linear-algebra/iq-quantization.md
+    - Performance Analysis: linear-algebra/performance-analysis.md
+
+  - "Layer 3: Neural Primitives":
+    - neural-primitives/index.md
+    - Activation Functions: neural-primitives/activation-functions.md
+    - Normalization Layers: neural-primitives/normalization.md
+    - Embedding Systems: neural-primitives/embeddings.md
+
+  - "Layer 4: Transformers":
+    - transformers/index.md
+    - Attention Mechanisms: transformers/attention-mechanisms.md
+    - Feed-Forward Networks: transformers/feed-forward-networks.md
+    - Transformer Blocks: transformers/transformer-blocks.md
+
+  - "Layer 5: Models":
+    - models/index.md
+    - Model Configuration: models/configuration.md
+    - Tokenization: models/tokenization.md
+    - Chat Templates: models/chat-templates.md
+    - GGUF Model Loading: models/gguf-loading.md
+    - "LLaMA / LLaMA 2": models/llama.md
+    - Mistral: models/mistral.md
+    - GPT-2: models/gpt2.md
+    - Falcon: models/falcon.md
+    - Qwen: models/qwen.md
+    - Phi: models/phi.md
+    - GPT-J: models/gptj.md
+    - GPT-NeoX: models/gpt-neox.md
+    - BLOOM: models/bloom.md
+    - Mamba: models/mamba.md
+    - BERT: models/bert.md
+    - Gemma: models/gemma.md
+    - StarCoder: models/starcoder.md
+    - Mixture of Experts: models/mixture-of-experts.md
+    - Multi-Modal: models/multi-modal.md
+
+  - "Layer 6: Inference":
+    - inference/index.md
+    - Text Generation: inference/text-generation.md
+    - Sampling Strategies: inference/sampling-strategies.md
+    - Advanced Sampling: inference/advanced-sampling.md
+    - KV Cache: inference/kv-cache.md
+    - Streaming: inference/streaming.md
+    - Batch Processing: inference/batching.md
+    - Grammar Constraints: inference/grammar-constraints.md
+    - Performance Profiling: inference/profiling.md
+
+  - Tools & Server:
+    - tools/index.md
+    - HTTP Server: tools/http-server.md
+    - CLI Interface: tools/cli.md
+    - Model Converter: tools/model-converter.md
+    - Perplexity Evaluation: tools/perplexity.md
+
+  - API Reference:
+    - api/index.md
+    - foundation.tensor: api/tensor.md
+    - foundation.memory_mapping: api/memory-mapping.md
+    - foundation.gguf_format: api/gguf-format.md
+    - foundation.blas_integration: api/blas-integration.md
+    - foundation.threading: api/threading.md
+    - linear_algebra.matrix_ops: api/matrix-ops.md
+    - linear_algebra.quantization: api/quantization.md
+    - linear_algebra.k_quantization: api/k-quantization.md
+    - linear_algebra.iq_quantization: api/iq-quantization.md
+    - neural_primitives.activations: api/activations.md
+    - neural_primitives.normalization: api/normalization.md
+    - neural_primitives.embeddings: api/embeddings.md
+    - transformers.attention: api/attention.md
+    - transformers.feed_forward: api/feed-forward.md
+    - transformers.transformer_block: api/transformer-block.md
+    - models.llama: api/llama.md
+    - models.config: api/config.md
+    - models.tokenizer: api/tokenizer.md
+    - models.gguf: api/gguf.md
+    - inference.generation: api/generation.md
+    - inference.kv_cache: api/kv-cache.md
+    - inference.streaming: api/streaming.md
+    - inference.batching: api/batching.md
+    - inference.profiling: api/profiling.md
+    - inference.advanced_sampling: api/advanced-sampling.md
+    - inference.grammar_constraints: api/grammar-constraints.md
+
+  - Examples & Tutorials:
+    - examples/index.md
+    - "Tutorial: Your First Inference": examples/first-inference.md
+    - "Tutorial: Understanding Attention": examples/understanding-attention.md
+    - "Tutorial: Quantization in Practice": examples/quantization-practice.md
+    - "Tutorial: Building a Chatbot": examples/building-chatbot.md
+    - Demo Walkthroughs: examples/demo-walkthroughs.md
+
+  - Performance:
+    - performance/index.md
+    - Benchmarks: performance/benchmarks.md
+    - Optimization Guide: performance/optimization-guide.md
+    - Parity Analysis: performance/parity-analysis.md
+    - Memory Profiling: performance/memory-profiling.md
+
+  - References:
+    - references/index.md
+    - Academic Papers: references/papers.md
+    - Glossary: references/glossary.md
+    - Contributing: references/contributing.md
+    - Changelog: references/changelog.md
+    - Tags: references/tags.md

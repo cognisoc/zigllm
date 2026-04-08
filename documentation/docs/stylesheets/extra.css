@@ -1,0 +1,138 @@
+/* Academic Admonition Types for ZigLlama Documentation */
+
+/* Definition Box - formal mathematical definitions */
+:root {
+  --md-admonition-icon--definition: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>');
+}
+.md-typeset .admonition.definition,
+.md-typeset details.definition {
+  border-color: #2196F3;
+}
+.md-typeset .definition > .admonition-title,
+.md-typeset .definition > summary {
+  background-color: rgba(33, 150, 243, 0.1);
+}
+.md-typeset .definition > .admonition-title::before,
+.md-typeset .definition > summary::before {
+  background-color: #2196F3;
+  -webkit-mask-image: var(--md-admonition-icon--definition);
+  mask-image: var(--md-admonition-icon--definition);
+}
+
+/* Theorem Box - theorems and propositions */
+:root {
+  --md-admonition-icon--theorem: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/></svg>');
+}
+.md-typeset .admonition.theorem,
+.md-typeset details.theorem {
+  border-color: #4CAF50;
+}
+.md-typeset .theorem > .admonition-title,
+.md-typeset .theorem > summary {
+  background-color: rgba(76, 175, 80, 0.1);
+}
+.md-typeset .theorem > .admonition-title::before,
+.md-typeset .theorem > summary::before {
+  background-color: #4CAF50;
+  -webkit-mask-image: var(--md-admonition-icon--theorem);
+  mask-image: var(--md-admonition-icon--theorem);
+}
+
+/* Algorithm Box - pseudocode and algorithmic descriptions */
+:root {
+  --md-admonition-icon--algorithm: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.6 16.6l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4m-5.2 0L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4z"/></svg>');
+}
+.md-typeset .admonition.algorithm,
+.md-typeset details.algorithm {
+  border-color: #9C27B0;
+}
+.md-typeset .algorithm > .admonition-title,
+.md-typeset .algorithm > summary {
+  background-color: rgba(156, 39, 176, 0.1);
+}
+.md-typeset .algorithm > .admonition-title::before,
+.md-typeset .algorithm > summary::before {
+  background-color: #9C27B0;
+  -webkit-mask-image: var(--md-admonition-icon--algorithm);
+  mask-image: var(--md-admonition-icon--algorithm);
+}
+
+/* Complexity Box - computational complexity analysis */
+:root {
+  --md-admonition-icon--complexity: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>');
+}
+.md-typeset .admonition.complexity,
+.md-typeset details.complexity {
+  border-color: #F44336;
+}
+.md-typeset .complexity > .admonition-title,
+.md-typeset .complexity > summary {
+  background-color: rgba(244, 67, 54, 0.1);
+}
+.md-typeset .complexity > .admonition-title::before,
+.md-typeset .complexity > summary::before {
+  background-color: #F44336;
+  -webkit-mask-image: var(--md-admonition-icon--complexity);
+  mask-image: var(--md-admonition-icon--complexity);
+}
+
+/* Notation Box - mathematical notation conventions */
+:root {
+  --md-admonition-icon--notation: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>');
+}
+.md-typeset .admonition.notation,
+.md-typeset details.notation {
+  border-color: #FF9800;
+}
+.md-typeset .notation > .admonition-title,
+.md-typeset .notation > summary {
+  background-color: rgba(255, 152, 0, 0.1);
+}
+.md-typeset .notation > .admonition-title::before,
+.md-typeset .notation > summary::before {
+  background-color: #FF9800;
+  -webkit-mask-image: var(--md-admonition-icon--notation);
+  mask-image: var(--md-admonition-icon--notation);
+}
+
+/* Proof Box - collapsible proofs */
+:root {
+  --md-admonition-icon--proof: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>');
+}
+.md-typeset .admonition.proof,
+.md-typeset details.proof {
+  border-color: #607D8B;
+}
+.md-typeset .proof > .admonition-title,
+.md-typeset .proof > summary {
+  background-color: rgba(96, 125, 139, 0.1);
+}
+.md-typeset .proof > .admonition-title::before,
+.md-typeset .proof > summary::before {
+  background-color: #607D8B;
+  -webkit-mask-image: var(--md-admonition-icon--proof);
+  mask-image: var(--md-admonition-icon--proof);
+}
+
+/* Enhanced code block styling */
+.md-typeset code {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* Academic figure captions */
+.md-typeset figcaption {
+  font-style: italic;
+  text-align: center;
+  color: var(--md-default-fg-color--light);
+  margin-top: 0.5em;
+}
+
+/* Table of contents depth indicator */
+.md-nav__link--active {
+  font-weight: 700;
+}
+
+/* Math display centering */
+.arithmatex {
+  overflow-x: auto;
+}
