@@ -1,8 +1,9 @@
 site_name: ZigLlama
 site_description: "Educational LLM Inference in Zig — From Tensors to Transformers"
-site_url: https://zigllama.github.io
-repo_url: https://github.com/dipankar/zigllama
-repo_name: dipankar/zigllama
+site_url: https://docs.cognisoc.com/zigllm/
+repo_url: https://github.com/cognisoc/zigllm
+repo_name: cognisoc/zigllm
+edit_uri: edit/main/documentation/docs/
 copyright: "Copyright 2024–2026 ZigLlama Contributors — MIT License"
 
 theme:
