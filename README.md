@@ -6,7 +6,9 @@
 [![Zig](https://img.shields.io/badge/Zig-0.14+-f7a41d?logo=zig&logoColor=white)](https://ziglang.org)
 [![Tests](https://img.shields.io/badge/tests-285%2B_passing-brightgreen)](#testing)
 [![Models](https://img.shields.io/badge/architectures-18_families-blueviolet)](#model-architectures)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Skelf-Research/zigllm/pulls)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/cognisoc/zigllm/pulls)
+
+**[Website](https://zigllm.cognisoc.com)** · **[Docs](https://docs.cognisoc.com/zigllm/)** · **[GitHub](https://github.com/cognisoc/zigllm)**
 
 zigllm is an educational implementation of transformer architectures in Zig. It implements 18 model families (LLaMA, Mistral, GPT-2, Falcon, Mamba, BERT, and more) across 6 progressive layers, each building on the last. Every component is documented to teach *why* it works, not just *how*.
 
@@ -21,7 +23,7 @@ It is also a demonstration that Zig is a viable language for ML/AI workloads -- 
 ## Quick Start
 
 ```bash
-git clone https://github.com/Skelf-Research/zigllm.git
+git clone https://github.com/cognisoc/zigllm.git
 cd zigllm
 zig build test
 ```
@@ -114,3 +116,22 @@ Please keep code readable -- educational clarity takes priority over micro-optim
 - [Meta AI](https://ai.meta.com/) -- LLaMA architecture
 - [Georgi Gerganov / llama.cpp](https://github.com/ggerganov/llama.cpp) -- production reference
 - [Zig](https://ziglang.org/) -- the language
+
+---
+
+## Part of the Cognisoc stack
+
+**[Cognisoc](https://www.cognisoc.com)** builds open-source LLM inference for every language and every device — *LLM inference, everywhere.* This project is one of six:
+
+| Project | Language | What it does |
+|---|---|---|
+| [mullama](https://github.com/cognisoc/mullama) | Python · Node · Go · PHP · Rust · C | Local LLM runtime & server, drop-in Ollama alternative |
+| [unillm](https://github.com/cognisoc/unillm) | Rust | Modular inference runtime, 47 architectures |
+| [llamafu](https://github.com/cognisoc/llamafu) | Dart / Flutter | On-device inference for mobile apps |
+| [llmdot](https://github.com/cognisoc/llmdot) | C# / .NET | Local GGUF inference for the .NET ecosystem |
+| [cllm](https://github.com/cognisoc/cllm) | C | Bare-metal unikernel — boots straight into inference |
+| zigllm **(this project)** | Zig | Learn LLMs by building one, from tensors to text |
+
+🌐 [cognisoc.com](https://www.cognisoc.com) · 📚 [docs.cognisoc.com](https://docs.cognisoc.com) · 🐙 [github.com/cognisoc](https://github.com/cognisoc)
+
+---
